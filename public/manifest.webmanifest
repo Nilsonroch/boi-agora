@@ -1,0 +1,16 @@
+{
+  "name": "Boi Agora",
+  "short_name": "Boi Agora",
+  "description": "Painel vivo da pecuária com arroba, futuro, grãos e notícias.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#08111b",
+  "theme_color": "#e53935",
+  "icons": [
+    {
+      "src": "/logo-boi-agora.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
