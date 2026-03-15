@@ -48,9 +48,7 @@ function extractGoogleNewsItems(xml, maxItems = 5) {
       stripHtml((raw.match(/<source[^>]*>([\s\S]*?)<\/source>/i) || [])[1] || "") ||
       "Google News";
 
-    if (title && link) {
-      items.push({ title, link, source });
-    }
+    if (title && link) items.push({ title, link, source });
   }
 
   return items;
@@ -58,22 +56,14 @@ function extractGoogleNewsItems(xml, maxItems = 5) {
 
 function normalizeMoneyBR(value) {
   if (value == null || value === "") return null;
-
-  const str = String(value).trim();
-
-  // Já vem com moeda
-  if (/R\$/i.test(str)) return str.replace(/\s+/g, " ").trim();
-
-  // Número com ponto decimal
-  const num = Number(str);
+  const num = Number(value);
   if (!Number.isNaN(num)) {
     return new Intl.NumberFormat("pt-BR", {
       style: "currency",
       currency: "BRL",
     }).format(num);
   }
-
-  return str;
+  return String(value);
 }
 
 function formatPercent(value) {
@@ -88,40 +78,15 @@ function fallbackPayload(extra = {}) {
     updatedAt: toPtDate(),
     status: "Exibindo contingência",
     location: DEFAULT_LOCATION,
-    arroba: {
-      value: "R$ 295,00",
-      change: "0,00%",
-      source: "Contingência",
-    },
-    futuro: {
-      value: "R$ 310,00",
-      change: "0,00%",
-      source: "Contingência",
-    },
-    graos: {
-      milho: "R$ 68,00",
-      soja: "R$ 128,00",
-      source: "Contingência",
-    },
+    arroba: { value: "R$ 295,00", change: "0,00%", source: "Contingência" },
+    futuro: { value: "R$ 310,00", change: "0,00%", source: "Contingência" },
+    graos: { milho: "R$ 68,00", soja: "R$ 128,00", source: "Contingência" },
     noticias: [
-      {
-        title: "Mercado pecuário em monitoramento",
-        link: "https://news.google.com/",
-        source: "Boi Agora",
-      },
-      {
-        title: "Arroba e grãos aguardando atualização externa",
-        link: "https://news.google.com/",
-        source: "Boi Agora",
-      },
-      {
-        title: "Painel operando em modo de contingência",
-        link: "https://news.google.com/",
-        source: "Boi Agora",
-      },
+      { title: "Mercado pecuário em monitoramento", link: "https://news.google.com/", source: "Boi Agora" },
+      { title: "Arroba e grãos aguardando atualização externa", link: "https://news.google.com/", source: "Boi Agora" },
+      { title: "Painel operando em modo de contingência", link: "https://news.google.com/", source: "Boi Agora" },
     ],
-    warning:
-      "Não foi possível atualizar completamente o painel. Alguns blocos podem estar em contingência.",
+    warning: "Não foi possível atualizar completamente o painel.",
     ...extra,
   };
 }
@@ -135,11 +100,7 @@ async function fetchText(url, init = {}) {
       ...(init.headers || {}),
     },
   });
-
-  if (!res.ok) {
-    throw new Error(`Falha ao buscar ${url}: ${res.status}`);
-  }
-
+  if (!res.ok) throw new Error(`Falha ao buscar ${url}: ${res.status}`);
   return res.text();
 }
 
@@ -152,11 +113,7 @@ async function fetchJson(url, init = {}) {
       ...(init.headers || {}),
     },
   });
-
-  if (!res.ok) {
-    throw new Error(`Falha ao buscar ${url}: ${res.status}`);
-  }
-
+  if (!res.ok) throw new Error(`Falha ao buscar ${url}: ${res.status}`);
   return res.json();
 }
 
@@ -166,111 +123,120 @@ async function getNoticias() {
 
   const xml = await fetchText(rssUrl);
   const noticias = extractGoogleNewsItems(xml, 5);
-
-  if (!noticias.length) {
-    throw new Error("RSS sem notícias");
-  }
-
+  if (!noticias.length) throw new Error("RSS sem notícias");
   return noticias;
 }
 
-async function getBrapiQuote(symbol) {
-  const token = process.env.BRAPI_TOKEN;
-  if (!token) return null;
-
-  const url = `https://brapi.dev/api/quote/${encodeURIComponent(symbol)}?token=${encodeURIComponent(
-    token
-  )}`;
-
+async function getBrapiQuote(symbol, token) {
+  const url = `https://brapi.dev/api/quote/${encodeURIComponent(symbol)}?token=${encodeURIComponent(token)}`;
   const data = await fetchJson(url);
-  const item = data?.results?.[0];
-  if (!item) return null;
-
-  return item;
-}
-
-async function getMercadoViaBrapi() {
-  const boiEtf = await getBrapiQuote("BBOI11");
-  const milhoEtf = await getBrapiQuote("CORN11");
-  const sojaEtf = await getBrapiQuote("SOJA3"); // pode falhar, por isso é opcional
-
   return {
-    boiEtf,
-    milhoEtf,
-    sojaEtf,
+    raw: data,
+    item: data?.results?.[0] || null,
   };
 }
 
-function buildPayload({ noticias, mercado }) {
-  const boi = mercado?.boiEtf;
-  const milho = mercado?.milhoEtf;
-  const soja = mercado?.sojaEtf;
-
-  return {
-    updatedAt: toPtDate(),
-    status: "Atualizado",
-    location: DEFAULT_LOCATION,
-    arroba: boi
-      ? {
-          value: normalizeMoneyBR(boi.regularMarketPrice),
-          change: formatPercent(boi.regularMarketChangePercent),
-          source: "Proxy BBOI11 / B3",
-        }
-      : {
-          value: "R$ 295,00",
-          change: "0,00%",
-          source: "Contingência",
-        },
-    futuro: boi
-      ? {
-          value: normalizeMoneyBR(boi.regularMarketPrice),
-          change: formatPercent(boi.regularMarketChangePercent),
-          source: "Proxy BBOI11 / B3",
-        }
-      : {
-          value: "R$ 310,00",
-          change: "0,00%",
-          source: "Contingência",
-        },
-    graos: {
-      milho: milho
-        ? normalizeMoneyBR(milho.regularMarketPrice)
-        : "R$ 68,00",
-      soja: soja
-        ? normalizeMoneyBR(soja.regularMarketPrice)
-        : "R$ 128,00",
-      source: milho || soja ? "brapi/B3" : "Contingência",
-    },
-    noticias,
-    warning:
-      boi || milho || soja
-        ? ""
-        : "Notícias atualizadas. Cotações seguem em contingência porque falta fonte autenticada de mercado.",
+export default async () => {
+  const token = process.env.BRAPI_TOKEN || "";
+  const diagnostics = {
+    tokenConfigured: Boolean(token),
+    tokenPrefix: token ? `${token.slice(0, 4)}...${token.slice(-3)}` : null,
+    testedSymbols: [],
+    brapi: {},
+    errors: [],
   };
-}
 
-export default async (request, context) => {
   try {
-    const [noticias, mercado] = await Promise.allSettled([
-      getNoticias(),
-      getMercadoViaBrapi(),
-    ]);
+    const noticias = await getNoticias().catch((err) => {
+      diagnostics.errors.push(`noticias: ${err.message}`);
+      return fallbackPayload().noticias;
+    });
 
-    const noticiasOk =
-      noticias.status === "fulfilled" && Array.isArray(noticias.value)
-        ? noticias.value
-        : fallbackPayload().noticias;
+    let boi = null;
+    let milho = null;
+    let soja = null;
 
-    const mercadoOk =
-      mercado.status === "fulfilled" ? mercado.value : null;
+    if (token) {
+      const symbols = ["BBOI11", "CORN11", "SOJA3"];
+      diagnostics.testedSymbols = symbols;
 
-    return json(buildPayload({ noticias: noticiasOk, mercado: mercadoOk }));
+      for (const symbol of symbols) {
+        try {
+          const result = await getBrapiQuote(symbol, token);
+          diagnostics.brapi[symbol] = {
+            ok: true,
+            hasResults: Array.isArray(result.raw?.results),
+            resultCount: Array.isArray(result.raw?.results) ? result.raw.results.length : 0,
+            itemFound: Boolean(result.item),
+            price: result.item?.regularMarketPrice ?? null,
+            changePercent: result.item?.regularMarketChangePercent ?? null,
+            shortName: result.item?.shortName ?? null,
+            longName: result.item?.longName ?? null,
+          };
+
+          if (symbol === "BBOI11") boi = result.item;
+          if (symbol === "CORN11") milho = result.item;
+          if (symbol === "SOJA3") soja = result.item;
+        } catch (err) {
+          diagnostics.brapi[symbol] = {
+            ok: false,
+            error: err.message,
+          };
+          diagnostics.errors.push(`${symbol}: ${err.message}`);
+        }
+      }
+    } else {
+      diagnostics.errors.push("BRAPI_TOKEN ausente");
+    }
+
+    const payload = {
+      updatedAt: toPtDate(),
+      status: "Atualizado",
+      location: DEFAULT_LOCATION,
+      arroba: boi
+        ? {
+            value: normalizeMoneyBR(boi.regularMarketPrice),
+            change: formatPercent(boi.regularMarketChangePercent),
+            source: "Proxy BBOI11 / B3",
+          }
+        : {
+            value: "R$ 295,00",
+            change: "0,00%",
+            source: "Contingência",
+          },
+      futuro: boi
+        ? {
+            value: normalizeMoneyBR(boi.regularMarketPrice),
+            change: formatPercent(boi.regularMarketChangePercent),
+            source: "Proxy BBOI11 / B3",
+          }
+        : {
+            value: "R$ 310,00",
+            change: "0,00%",
+            source: "Contingência",
+          },
+      graos: {
+        milho: milho ? normalizeMoneyBR(milho.regularMarketPrice) : "R$ 68,00",
+        soja: soja ? normalizeMoneyBR(soja.regularMarketPrice) : "R$ 128,00",
+        source: milho || soja ? "brapi/B3" : "Contingência",
+      },
+      noticias,
+      warning:
+        boi || milho || soja
+          ? ""
+          : "Notícias atualizadas. Cotações seguem em contingência.",
+      diagnostics,
+    };
+
+    return json(payload);
   } catch (error) {
     return json(
       fallbackPayload({
-        warning:
-          "Não foi possível atualizar o painel agora. O painel segue funcionando com dados de contingência.",
-        debug: error instanceof Error ? error.message : "Erro desconhecido",
+        warning: "Falha geral na função.",
+        diagnostics: {
+          ...diagnostics,
+          fatalError: error.message,
+        },
       }),
       200
     );
