@@ -22,13 +22,26 @@ function toWhatsappLink(message) {
   return `https://wa.me/5562998575050?text=${encodeURIComponent(message)}`;
 }
 
+function extractNumber(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return value;
+
+  const normalized = String(value)
+    .replace(/[^\d,.-]/g, '')
+    .replace(/\.(?=\d{3}(\D|$))/g, '')
+    .replace(',', '.');
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 function buildHistoryPoint(payload) {
   return {
     timestamp: payload.updatedAt || new Date().toISOString(),
-    arroba: Number(payload.arroba?.[0]?.cash || 0),
-    futuro: Number(payload.future?.[0]?.price || 0),
-    milho: Number(payload.grains?.find((item) => /milho/i.test(item.product))?.price || 0),
-    soja: Number(payload.grains?.find((item) => /soja/i.test(item.product))?.price || 0),
+    arroba: extractNumber(payload.arroba?.value),
+    futuro: extractNumber(payload.futuro?.value),
+    milho: extractNumber(payload.graos?.milho),
+    soja: extractNumber(payload.graos?.soja),
   };
 }
 
@@ -114,39 +127,28 @@ function MiniChart({ data, dataKey, title, suffix = '' }) {
 
 const MOCK_DATA = {
   updatedAt: new Date().toISOString(),
+  city: 'Jataí (GO)',
   sources: [
-    { name: 'Scot Consultoria', url: 'https://www.scotconsultoria.com.br/cotacoes/boi-gordo/' },
+    { name: 'Google News', url: 'https://news.google.com/' },
     { name: 'B3', url: 'https://www.b3.com.br/pt_br/produtos-e-servicos/negociacao/commodities/' },
-    { name: 'Agrolink', url: 'https://www.agrolink.com.br/cotacoes/' },
-    { name: 'Canal Rural', url: 'https://www.canalrural.com.br/pecuaria/' },
+    { name: 'brapi', url: 'https://brapi.dev/' },
   ],
-  arroba: [
-    { region: 'GO Goiânia', state: 'GO', cash: 326.5, term: 330.0 },
-    { region: 'SP Barretos', state: 'SP', cash: 343.5, term: 347.0 },
-    { region: 'MG Triângulo', state: 'MG', cash: 322.0, term: 325.0 },
-  ],
-  future: [
-    { contract: 'Abr/26', price: 343.1 },
-    { contract: 'Mai/26', price: 338.4 },
-    { contract: 'Jun/26', price: 334.8 },
-  ],
-  grains: [
-    { product: 'Milho Seco Sc 60Kg', region: 'Jataí (GO)', price: 69.5, unit: '/sc' },
-    { product: 'Soja em Grão Sc 60Kg', region: 'Jataí (GO)', price: 121.8, unit: '/sc' },
-    { product: 'Milho Seco Sc 60Kg', region: 'Uberlândia (MG)', price: 68.2, unit: '/sc' },
-  ],
-  news: [
+  arroba: { value: 'R$ 295,00', change: '0,00%', source: 'Contingência' },
+  futuro: { value: 'R$ 310,00', change: '0,00%', source: 'Contingência' },
+  graos: { milho: 'R$ 68,00', soja: 'R$ 128,00', source: 'Contingência' },
+  noticias: [
     {
-      title: 'Exportações de carne bovina seguem fortes e sustentam mercado do boi',
-      link: 'https://www.canalrural.com.br/pecuaria/',
-      source: 'Canal Rural',
+      title: 'Mercado pecuário em monitoramento',
+      link: 'https://news.google.com/',
+      source: 'Boi Agora',
     },
     {
-      title: 'Planejamento forrageiro ganha força no ciclo de alta da pecuária',
-      link: 'https://www.canalrural.com.br/pecuaria/',
-      source: 'Canal Rural',
+      title: 'Arroba e grãos aguardando atualização externa',
+      link: 'https://news.google.com/',
+      source: 'Boi Agora',
     },
   ],
+  warning: 'Não foi possível atualizar completamente o painel.',
 };
 
 function App() {
@@ -154,7 +156,6 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [city, setCity] = useState('jatai');
-  const [stateFilter, setStateFilter] = useState('TODOS');
   const [refreshTick, setRefreshTick] = useState(0);
   const [history, setHistory] = useState([]);
 
@@ -170,7 +171,7 @@ function App() {
       setError('');
 
       try {
-        const response = await fetch(`/.netlify/functions/dashboard?city=${city}`, {
+        const response = await fetch(`/.netlify/functions/painel?city=${city}`, {
           headers: { Accept: 'application/json' },
         });
 
@@ -179,10 +180,15 @@ function App() {
         }
 
         const payload = await response.json();
+
         if (!cancelled) {
           const merged = { ...MOCK_DATA, ...payload };
           setData(merged);
           setHistory(saveHistory(city, buildHistoryPoint(merged)));
+
+          if (payload.warning) {
+            setError(payload.warning);
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -206,24 +212,14 @@ function App() {
     };
   }, [city, refreshTick]);
 
-  const filteredArroba = useMemo(() => {
-    if (stateFilter === 'TODOS') return data.arroba || [];
-    return (data.arroba || []).filter((item) => item.state === stateFilter || item.region?.startsWith(`${stateFilter} `));
-  }, [data.arroba, stateFilter]);
-
   const summary = useMemo(() => {
-    const bestArroba = [...filteredArroba].sort((a, b) => (b.cash || 0) - (a.cash || 0))[0];
-    const firstFuture = data.future?.[0];
-    const milho = data.grains?.find((item) => /milho/i.test(item.product));
-    const soja = data.grains?.find((item) => /soja/i.test(item.product));
-
     return {
-      bestArroba,
-      firstFuture,
-      milho,
-      soja,
+      arroba: data.arroba,
+      futuro: data.futuro,
+      milho: data.graos?.milho,
+      soja: data.graos?.soja,
     };
-  }, [data, filteredArroba]);
+  }, [data]);
 
   const alerts = useMemo(() => {
     const current = history[history.length - 1];
@@ -232,6 +228,7 @@ function App() {
       arroba: deltaInfo(current?.arroba, previous?.arroba),
       futuro: deltaInfo(current?.futuro, previous?.futuro),
       milho: deltaInfo(current?.milho, previous?.milho),
+      soja: deltaInfo(current?.soja, previous?.soja),
     };
   }, [history]);
 
@@ -244,7 +241,7 @@ function App() {
             <span className="badge">Aplicativo de inteligência de mercado</span>
             <h1>Boi Agora</h1>
             <p>
-              Painel vivo da pecuária com preço da arroba, mercado futuro, grãos e notícias estratégicas
+              Painel vivo da pecuária com referência B3 do boi, mercado futuro, grãos e notícias estratégicas
               sempre que o aplicativo for acessado.
             </p>
           </div>
@@ -252,23 +249,12 @@ function App() {
 
         <div className="hero__actions">
           <label className="field">
-            <span>Praça de grãos</span>
+            <span>Praça monitorada</span>
             <select value={city} onChange={(e) => setCity(e.target.value)}>
               <option value="jatai">Jataí GO</option>
               <option value="mineiros">Mineiros GO</option>
               <option value="formosa">Formosa GO</option>
               <option value="uberlandia">Uberlândia MG</option>
-            </select>
-          </label>
-
-          <label className="field">
-            <span>Filtro por estado da arroba</span>
-            <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>
-              <option value="TODOS">Todos</option>
-              <option value="GO">Goiás</option>
-              <option value="SP">São Paulo</option>
-              <option value="MG">Minas Gerais</option>
-              <option value="MT">Mato Grosso</option>
             </select>
           </label>
 
@@ -294,15 +280,15 @@ function App() {
         </div>
         <div>
           <strong>Status</strong>
-          <span>{loading ? 'Atualizando dados...' : error ? 'Exibindo contingência' : 'Online'}</span>
+          <span>{loading ? 'Atualizando dados...' : error ? 'Atualizado com observações' : 'Online'}</span>
         </div>
         <div>
           <strong>Praça monitorada</strong>
-          <span>{data.city || 'Jataí (GO)'}</span>
+          <span>{data.location || data.city || 'Jataí (GO)'}</span>
         </div>
       </section>
 
-      {error ? <div className="alert">{error} O painel segue funcionando com dados de contingência.</div> : null}
+      {error ? <div className="alert">{error}</div> : null}
 
       <section className="commercial-grid">
         <article className="commercial-card">
@@ -311,16 +297,16 @@ function App() {
           </span>
           <strong>{alerts.arroba.label}</strong>
           <p>
-            A arroba está em {formatCurrency(summary.bestArroba?.cash, '/@')} na melhor praça filtrada. Use esse sinal para
-            leitura de venda, retenção ou reposição.
+            A referência B3 do boi está em {summary.arroba?.value || '—'}. Use esse sinal como apoio para leitura de
+            mercado e posicionamento comercial.
           </p>
         </article>
 
         <article className="commercial-card">
           <span className={`trend-pill trend-pill--${alerts.futuro.direction}`}>Mercado futuro</span>
-          <strong>{summary.firstFuture?.contract || 'Sem contrato disponível'}</strong>
+          <strong>{summary.futuro?.source || 'Sem fonte disponível'}</strong>
           <p>
-            Primeiro vencimento em {formatCurrency(summary.firstFuture?.price, '/@')}. Acompanhe tendência e hedge com atualização local.
+            O mercado futuro do boi está em {summary.futuro?.value || '—'}. Acompanhe a direção do mercado com atualização do painel.
           </p>
         </article>
 
@@ -328,36 +314,40 @@ function App() {
           <span className="trend-pill trend-pill--stable">Ação comercial</span>
           <strong>Leitura rápida para decisão de compra e venda</strong>
           <p>
-            Veja arroba, grãos e notícias em um só lugar e acione seu atendimento técnico comercial com um toque.
+            Veja referência B3 do boi, mercado futuro, milho, soja e notícias em um só lugar e acione seu atendimento técnico comercial com um toque.
           </p>
         </article>
       </section>
 
       <section className="summary-grid">
         <article className="summary-card">
-          <span className="summary-card__label">Maior arroba no painel</span>
-          <strong>{formatCurrency(summary.bestArroba?.cash, '/@')}</strong>
-          <small>{summary.bestArroba?.region || '—'}</small>
+          <span className="summary-card__label">Arroba referência B3</span>
+          <strong>{summary.arroba?.value || '—'}</strong>
+          <small>Fonte: {summary.arroba?.source || '—'}</small>
         </article>
 
         <article className="summary-card">
-          <span className="summary-card__label">1º vencimento futuro</span>
-          <strong>{formatCurrency(summary.firstFuture?.price, '/@')}</strong>
-          <small>{summary.firstFuture?.contract || '—'}</small>
+          <span className="summary-card__label">Mercado futuro do boi</span>
+          <strong>{summary.futuro?.value || '—'}</strong>
+          <small>Fonte: {summary.futuro?.source || '—'}</small>
         </article>
 
         <article className="summary-card">
-          <span className="summary-card__label">Milho na praça</span>
-          <strong>{formatCurrency(summary.milho?.price, summary.milho?.unit || '')}</strong>
-          <small>{summary.milho?.region || '—'}</small>
+          <span className="summary-card__label">Milho</span>
+          <strong>{summary.milho || '—'}</strong>
+          <small>Fonte: {data.graos?.source || '—'}</small>
         </article>
 
         <article className="summary-card">
-          <span className="summary-card__label">Soja na praça</span>
-          <strong>{formatCurrency(summary.soja?.price, summary.soja?.unit || '')}</strong>
-          <small>{summary.soja?.region || '—'}</small>
+          <span className="summary-card__label">Soja</span>
+          <strong>{summary.soja || '—'}</strong>
+          <small>Fonte: {data.graos?.source || '—'}</small>
         </article>
       </section>
+
+      <div className="market-note">
+        A arroba exibida no painel é uma referência de mercado via B3 e não substitui a cotação física local por praça pecuária.
+      </div>
 
       <section className="panel panel--full">
         <div className="panel__header">
@@ -368,10 +358,10 @@ function App() {
         </div>
 
         <div className="chart-grid">
-          <MiniChart data={history} dataKey="arroba" title="Arroba" suffix="/@" />
-          <MiniChart data={history} dataKey="futuro" title="Futuro" suffix="/@" />
-          <MiniChart data={history} dataKey="milho" title="Milho" suffix="/sc" />
-          <MiniChart data={history} dataKey="soja" title="Soja" suffix="/sc" />
+          <MiniChart data={history} dataKey="arroba" title="Arroba referência B3" suffix="/@" />
+          <MiniChart data={history} dataKey="futuro" title="Mercado futuro do boi" suffix="/@" />
+          <MiniChart data={history} dataKey="milho" title="Milho" />
+          <MiniChart data={history} dataKey="soja" title="Soja" />
         </div>
       </section>
 
@@ -379,48 +369,48 @@ function App() {
         <section className="panel">
           <div className="panel__header">
             <div>
-              <h2>Preço da arroba</h2>
-              <p>Mercado físico em praças pecuárias de referência com filtro por estado.</p>
+              <h2>Arroba referência B3</h2>
+              <p>Referência financeira usada como apoio de leitura de mercado.</p>
             </div>
           </div>
 
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Região</th>
-                  <th>À vista</th>
-                  <th>30 dias</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredArroba.map((item) => (
-                  <tr key={item.region}>
-                    <td>{item.region}</td>
-                    <td>{formatCurrency(item.cash, '/@')}</td>
-                    <td>{formatCurrency(item.term, '/@')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="chips">
+            <div className="chip-card">
+              <span>Valor atual</span>
+              <strong>{data.arroba?.value || '—'}</strong>
+            </div>
+            <div className="chip-card">
+              <span>Variação</span>
+              <strong>{data.arroba?.change || '—'}</strong>
+            </div>
+            <div className="chip-card">
+              <span>Fonte</span>
+              <strong>{data.arroba?.source || '—'}</strong>
+            </div>
           </div>
         </section>
 
         <section className="panel">
           <div className="panel__header">
             <div>
-              <h2>Mercado futuro</h2>
-              <p>Contratos do boi gordo para leitura de tendência e hedge.</p>
+              <h2>Mercado futuro do boi</h2>
+              <p>Leitura de mercado futuro para acompanhamento e estratégia comercial.</p>
             </div>
           </div>
 
           <div className="chips">
-            {data.future?.map((item) => (
-              <div key={item.contract} className="chip-card">
-                <span>{item.contract}</span>
-                <strong>{formatCurrency(item.price, '/@')}</strong>
-              </div>
-            ))}
+            <div className="chip-card">
+              <span>Valor atual</span>
+              <strong>{data.futuro?.value || '—'}</strong>
+            </div>
+            <div className="chip-card">
+              <span>Variação</span>
+              <strong>{data.futuro?.change || '—'}</strong>
+            </div>
+            <div className="chip-card">
+              <span>Fonte</span>
+              <strong>{data.futuro?.source || '—'}</strong>
+            </div>
           </div>
         </section>
 
@@ -428,29 +418,23 @@ function App() {
           <div className="panel__header">
             <div>
               <h2>Grãos</h2>
-              <p>Milho e soja por praça selecionada.</p>
+              <p>Milho e soja monitorados no painel.</p>
             </div>
           </div>
 
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Produto</th>
-                  <th>Praça</th>
-                  <th>Preço</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.grains?.map((item, index) => (
-                  <tr key={`${item.product}-${index}`}>
-                    <td>{item.product}</td>
-                    <td>{item.region}</td>
-                    <td>{formatCurrency(item.price, item.unit || '')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="chips">
+            <div className="chip-card">
+              <span>Milho</span>
+              <strong>{data.graos?.milho || '—'}</strong>
+            </div>
+            <div className="chip-card">
+              <span>Soja</span>
+              <strong>{data.graos?.soja || '—'}</strong>
+            </div>
+            <div className="chip-card">
+              <span>Fonte</span>
+              <strong>{data.graos?.source || '—'}</strong>
+            </div>
           </div>
         </section>
 
@@ -463,7 +447,7 @@ function App() {
           </div>
 
           <div className="news-list">
-            {data.news?.map((item, index) => (
+            {(data.noticias || data.news || []).map((item, index) => (
               <a key={`${item.title}-${index}`} className="news-card" href={item.link} target="_blank" rel="noreferrer">
                 <span>{item.source}</span>
                 <strong>{item.title}</strong>
