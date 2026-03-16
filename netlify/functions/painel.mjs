@@ -5,7 +5,7 @@ const URL_NEWS =
   'https://news.google.com/rss/search?q=pecu%C3%A1ria+de+corte+OR+boi+gordo+OR+mercado+do+boi+OR+milho+OR+soja+Brasil&hl=pt-BR&gl=BR&ceid=BR:pt-419';
 
 function json(data, status = 200) {
-  return new Response(JSON.stringify(data, null, 2), {
+  return new Response(JSON.stringify(data), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
@@ -37,6 +37,28 @@ function decodeEntities(text = '') {
     .replace(/&uuml;/gi, 'ü');
 }
 
+function stripHtmlWithLines(html = '') {
+  return decodeEntities(
+    html
+      .replace(/<\/(tr|p|div|li|h1|h2|h3|h4|br|table|thead|tbody|td|th|section|article)>/gi, '\n')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\r/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{2,}/g, '\n')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim()
+  );
+}
+
+function toLines(text = '') {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function stripHtml(text = '') {
   return decodeEntities(
     text
@@ -45,6 +67,30 @@ function stripHtml(text = '') {
       .replace(/\s+/g, ' ')
       .trim()
   );
+}
+
+function brToNumber(value) {
+  if (!value) return null;
+  const num = Number(String(value).replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(num) ? num : null;
+}
+
+function moneyArroba(value) {
+  if (value == null) return null;
+  return `R$ ${Number(value).toFixed(2).replace('.', ',')}/@`;
+}
+
+function moneySaca(value) {
+  if (value == null) return null;
+  return `R$ ${Number(value).toFixed(2).replace('.', ',')}/sc`;
+}
+
+function percentText(value) {
+  if (value == null) return '';
+  const num = Number(value);
+  if (!Number.isFinite(num)) return '';
+  const signal = num > 0 ? '+' : '';
+  return `${signal}${num.toFixed(2).replace('.', ',')}%`;
 }
 
 async function fetchText(url) {
@@ -60,35 +106,11 @@ async function fetchText(url) {
     },
   });
 
-  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Falha ao buscar ${url}: ${response.status}`);
+  }
 
-  return {
-    ok: response.ok,
-    status: response.status,
-    url,
-    body,
-    headers: {
-      contentType: response.headers.get('content-type'),
-      cacheControl: response.headers.get('cache-control'),
-      server: response.headers.get('server'),
-    },
-  };
-}
-
-function preview(text = '', size = 3000) {
-  return decodeEntities(text).slice(0, size);
-}
-
-function lines(text = '', count = 120) {
-  return decodeEntities(text)
-    .replace(/<\/(tr|p|div|li|h1|h2|h3|h4|br|table|thead|tbody|td|th|section|article)>/gi, '\n')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]*>/g, ' ')
-    .split('\n')
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .slice(0, count);
+  return response.text();
 }
 
 function extractNewsItems(xml, maxItems = 6) {
@@ -109,76 +131,241 @@ function extractNewsItems(xml, maxItems = 6) {
   return items;
 }
 
+function parsePublishedAt(lines) {
+  const line = lines.find((item) =>
+    /[A-Za-zçÇãõáéíóúâêô-]+,\s*\d{1,2}\s+de\s+[A-Za-zçÇãõáéíóúâêô]+\s+de\s+\d{4}\s*-\s*\d{2}h\d{2}/i.test(item)
+  );
+  return line || new Date().toLocaleString('pt-BR');
+}
+
+function parseBoiByPlaza(lines, plaza) {
+  if (plaza === 'sao-paulo') {
+    const fisico = lines.find((line) => line.startsWith('SP Barretos '));
+    if (fisico) {
+      const m = fisico.match(/^SP Barretos\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
+      if (m) {
+        return {
+          region: 'SP Barretos',
+          value: brToNumber(m[1]),
+          term: brToNumber(m[2]),
+          note: 'Última cotação publicada do mercado físico em São Paulo',
+        };
+      }
+    }
+
+    const china = lines.find((line) => line.startsWith('São Paulo '));
+    if (china) {
+      const m = china.match(/^São Paulo\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
+      if (m) {
+        return {
+          region: 'São Paulo',
+          value: brToNumber(m[1]),
+          term: brToNumber(m[2]),
+          note: 'Última cotação publicada para boi China a prazo em São Paulo',
+        };
+      }
+    }
+
+    return null;
+  }
+
+  const fisico = lines.find((line) => line.startsWith('GO Goiânia '));
+  if (fisico) {
+    const m = fisico.match(/^GO Goiânia\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
+    if (m) {
+      return {
+        region: 'GO Goiânia',
+        value: brToNumber(m[1]),
+        term: brToNumber(m[2]),
+        note: 'Última cotação publicada do mercado físico em Goiás',
+      };
+    }
+  }
+
+  const china = lines.find((line) => line.startsWith('Goiás '));
+  if (china) {
+    const m = china.match(/^Goiás\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
+    if (m) {
+      return {
+        region: 'Goiás',
+        value: brToNumber(m[1]),
+        term: brToNumber(m[2]),
+        note: 'Última cotação publicada para boi China a prazo em Goiás',
+      };
+    }
+  }
+
+  return null;
+}
+
+function parseGraosByPlaza(lines, plaza) {
+  if (plaza === 'sao-paulo') {
+    const milhoLine = lines.find((line) => /^SP\s+São Paulo\s+\d{1,3},\d{2}$/.test(line));
+    const sojaLine = lines.find((line) => /^SP\s+Santos\s+\d{1,3},\d{2}$/.test(line));
+
+    return {
+      milho: milhoLine
+        ? {
+            value: brToNumber(milhoLine.match(/(\d{1,3},\d{2})$/)?.[1]),
+            praca: 'São Paulo (SP)',
+            note: 'Última cotação publicada de milho para São Paulo',
+          }
+        : null,
+      soja: sojaLine
+        ? {
+            value: brToNumber(sojaLine.match(/(\d{1,3},\d{2})$/)?.[1]),
+            praca: 'Santos (SP)',
+            note: 'Última cotação publicada de soja para Santos (SP)',
+          }
+        : null,
+    };
+  }
+
+  const milhoLine = lines.find((line) => /^GO\s+Itumbiara\s+\d{1,3},\d{2}$/.test(line));
+  const sojaLine = lines.find((line) => /^Jata[ií]\s+\d{1,3},\d{2}$/.test(line)) ||
+                   lines.find((line) => /^GO\s+Jata[ií]\s+\d{1,3},\d{2}$/.test(line));
+
+  return {
+    milho: milhoLine
+      ? {
+          value: brToNumber(milhoLine.match(/(\d{1,3},\d{2})$/)?.[1]),
+          praca: 'Itumbiara (GO)',
+          note: 'Última cotação publicada de milho disponível em Goiás',
+        }
+      : null,
+    soja: sojaLine
+      ? {
+          value: brToNumber(sojaLine.match(/(\d{1,3},\d{2})$/)?.[1]),
+          praca: 'Jataí (GO)',
+          note: 'Última cotação publicada de soja para Jataí (GO)',
+        }
+      : null,
+  };
+}
+
+function parseFuturo(lines) {
+  const line = lines.find((item) => /^(Mar|Abr|Mai|Jun|Jul|Ago)\/\d{2}\s+\d{1,3},\d{2}\s+\d{1,3},\d{2}\s+\d+\s+-?\d{1,3},\d{2}\s+\d{1,3},\d{2}\s+\d{1,3},\d{2}$/.test(item));
+
+  if (!line) return null;
+
+  const m = line.match(
+    /^(Mar|Abr|Mai|Jun|Jul|Ago)\/(\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d+)\s+(-?\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})$/
+  );
+
+  if (!m) return null;
+
+  return {
+    contract: `${m[1]}/${m[2]}`,
+    prevAdjust: brToNumber(m[3]),
+    adjust: brToNumber(m[4]),
+    openInterest: Number(m[5]),
+    changePercent: brToNumber(m[6]),
+    usd: brToNumber(m[7]),
+    projection: brToNumber(m[8]),
+    note: 'Último ajuste publicado do mercado futuro do boi gordo',
+  };
+}
+
+function buildPayload(plaza, boi, futuro, graos, noticias, updatedAt) {
+  return {
+    updatedAt,
+    status: 'Atualizado',
+    location: plaza === 'sao-paulo' ? 'São Paulo' : 'Goiás',
+    arroba: boi
+      ? {
+          value: moneyArroba(boi.value),
+          term: moneyArroba(boi.term),
+          source: 'Scot Consultoria',
+          region: boi.region,
+          note: boi.note,
+        }
+      : null,
+    futuro: futuro
+      ? {
+          contract: futuro.contract,
+          value: moneyArroba(futuro.adjust),
+          change: percentText(futuro.changePercent),
+          projection: moneyArroba(futuro.projection),
+          source: 'Scot Consultoria / B3',
+          note: futuro.note,
+        }
+      : null,
+    graos: {
+      milho: graos.milho ? moneySaca(graos.milho.value) : null,
+      milhoPraca: graos.milho?.praca || null,
+      milhoNote: graos.milho?.note || '',
+      soja: graos.soja ? moneySaca(graos.soja.value) : null,
+      sojaPraca: graos.soja?.praca || null,
+      sojaNote: graos.soja?.note || '',
+      source: 'Scot Consultoria / AgRural',
+    },
+    noticias,
+    sources: [
+      { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
+      { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
+      { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
+      { name: 'Google News', url: 'https://news.google.com/' },
+    ],
+    warning: '',
+  };
+}
+
 export default async (request) => {
   try {
     const url = new URL(request.url);
     const plaza = url.searchParams.get('plaza') === 'sao-paulo' ? 'sao-paulo' : 'goias';
 
-    const [boi, graos, futuro, news] = await Promise.all([
+    const [boiHtml, graosHtml, futuroHtml, newsXml] = await Promise.all([
       fetchText(URL_BOI),
       fetchText(URL_GRAOS),
       fetchText(URL_FUTURO),
       fetchText(URL_NEWS),
     ]);
 
-    return json({
-      timestamp: new Date().toISOString(),
-      plaza,
-      sources: {
-        boi: {
-          ok: boi.ok,
-          status: boi.status,
-          url: boi.url,
-          headers: boi.headers,
-          preview: preview(boi.body),
-          lines: lines(boi.body),
-          hasGoias: /Goi[aá]s|GO Goi[aâ]nia|GO Reg\. Sul/i.test(decodeEntities(boi.body)),
-          hasSaoPaulo: /S[aã]o Paulo|SP Barretos|SP Ara[cç]atuba/i.test(decodeEntities(boi.body)),
-          hasBarretos: /Barretos/i.test(decodeEntities(boi.body)),
-          hasGoiania: /Goi[aâ]nia/i.test(decodeEntities(boi.body)),
-          hasChina: /Boi China/i.test(decodeEntities(boi.body)),
-        },
-        graos: {
-          ok: graos.ok,
-          status: graos.status,
-          url: graos.url,
-          headers: graos.headers,
-          preview: preview(graos.body),
-          lines: lines(graos.body),
-          hasItumbiara: /Itumbiara/i.test(decodeEntities(graos.body)),
-          hasJatai: /Jata[ií]/i.test(decodeEntities(graos.body)),
-          hasMineiros: /Mineiros/i.test(decodeEntities(graos.body)),
-          hasRioVerde: /Rio Verde/i.test(decodeEntities(graos.body)),
-          hasSantos: /Santos/i.test(decodeEntities(graos.body)),
-          hasSaoPaulo: /S[aã]o Paulo/i.test(decodeEntities(graos.body)),
-          hasMilho: /MILHO/i.test(decodeEntities(graos.body)),
-          hasSoja: /SOJA/i.test(decodeEntities(graos.body)),
-        },
-        futuro: {
-          ok: futuro.ok,
-          status: futuro.status,
-          url: futuro.url,
-          headers: futuro.headers,
-          preview: preview(futuro.body),
-          lines: lines(futuro.body),
-          hasMar26: /Mar\/\d{2}/i.test(decodeEntities(futuro.body)),
-          hasAbr26: /Abr\/\d{2}/i.test(decodeEntities(futuro.body)),
-          hasMai26: /Mai\/\d{2}/i.test(decodeEntities(futuro.body)),
-          hasJun26: /Jun\/\d{2}/i.test(decodeEntities(futuro.body)),
-        },
-        noticias: {
-          ok: news.ok,
-          status: news.status,
-          url: news.url,
-          headers: news.headers,
-          items: extractNewsItems(news.body),
-        },
-      },
-    });
+    const boiLines = toLines(stripHtmlWithLines(boiHtml));
+    const graosLines = toLines(stripHtmlWithLines(graosHtml));
+    const futuroLines = toLines(stripHtmlWithLines(futuroHtml));
+
+    const updatedAt = parsePublishedAt(boiLines);
+    const boi = parseBoiByPlaza(boiLines, plaza);
+    const graos = parseGraosByPlaza(graosLines, plaza);
+    const futuro = parseFuturo(futuroLines);
+    const noticias = extractNewsItems(newsXml, 6);
+
+    return json(buildPayload(plaza, boi, futuro, graos, noticias, updatedAt));
   } catch (error) {
-    return json({
-      timestamp: new Date().toISOString(),
-      error: error instanceof Error ? error.message : 'Erro desconhecido',
-    });
+    return json(
+      {
+        updatedAt: new Date().toLocaleString('pt-BR'),
+        status: 'Contingência',
+        location: 'Goiás',
+        warning: 'Não foi possível buscar as cotações no momento.',
+        debug: error instanceof Error ? error.message : 'Erro desconhecido',
+        arroba: null,
+        futuro: null,
+        graos: {
+          milho: null,
+          milhoPraca: null,
+          milhoNote: '',
+          soja: null,
+          sojaPraca: null,
+          sojaNote: '',
+          source: 'Scot Consultoria / AgRural',
+        },
+        noticias: [
+          {
+            title: 'Mercado pecuário em monitoramento',
+            link: 'https://news.google.com/',
+            source: 'Boi Agora',
+          },
+        ],
+        sources: [
+          { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
+          { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
+          { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
+        ],
+      },
+      200
+    );
   }
 };
