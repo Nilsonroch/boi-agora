@@ -5,7 +5,7 @@ const URL_NEWS =
   'https://news.google.com/rss/search?q=pecu%C3%A1ria+de+corte+OR+boi+gordo+OR+mercado+do+boi+OR+milho+OR+soja+Brasil&hl=pt-BR&gl=BR&ceid=BR:pt-419';
 
 function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
+  return new Response(JSON.stringify(data, null, 2), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
@@ -47,30 +47,6 @@ function stripHtml(text = '') {
   );
 }
 
-function brToNumber(value) {
-  if (!value) return null;
-  const num = Number(String(value).replace(/\./g, '').replace(',', '.'));
-  return Number.isFinite(num) ? num : null;
-}
-
-function moneyArroba(value) {
-  if (value == null) return null;
-  return `R$ ${Number(value).toFixed(2).replace('.', ',')}/@`;
-}
-
-function moneySaca(value) {
-  if (value == null) return null;
-  return `R$ ${Number(value).toFixed(2).replace('.', ',')}/sc`;
-}
-
-function percentText(value) {
-  if (value == null) return '';
-  const num = Number(value);
-  if (!Number.isFinite(num)) return '';
-  const signal = num > 0 ? '+' : '';
-  return `${signal}${num.toFixed(2).replace('.', ',')}%`;
-}
-
 async function fetchText(url) {
   const response = await fetch(url, {
     headers: {
@@ -84,11 +60,35 @@ async function fetchText(url) {
     },
   });
 
-  if (!response.ok) {
-    throw new Error(`Falha ao buscar ${url}: ${response.status}`);
-  }
+  const body = await response.text();
 
-  return response.text();
+  return {
+    ok: response.ok,
+    status: response.status,
+    url,
+    body,
+    headers: {
+      contentType: response.headers.get('content-type'),
+      cacheControl: response.headers.get('cache-control'),
+      server: response.headers.get('server'),
+    },
+  };
+}
+
+function preview(text = '', size = 3000) {
+  return decodeEntities(text).slice(0, size);
+}
+
+function lines(text = '', count = 120) {
+  return decodeEntities(text)
+    .replace(/<\/(tr|p|div|li|h1|h2|h3|h4|br|table|thead|tbody|td|th|section|article)>/gi, '\n')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]*>/g, ' ')
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, count);
 }
 
 function extractNewsItems(xml, maxItems = 6) {
@@ -109,235 +109,76 @@ function extractNewsItems(xml, maxItems = 6) {
   return items;
 }
 
-function parsePublishedAt(text) {
-  const decoded = decodeEntities(text);
-
-  const match =
-    decoded.match(/([A-Za-zçÇãõáéíóúâêô-]+,\s*\d{1,2}\s+de\s+[A-Za-zçÇãõáéíóúâêô]+\s+de\s+\d{4}\s*-\s*\d{2}h\d{2})/i) ||
-    decoded.match(/(\d{1,2}\/\d{1,2}\/\d{4}\s*-\s*\d{2}:\d{2}:\d{2})/) ||
-    decoded.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
-
-  return match ? match[1] : new Date().toLocaleString('pt-BR');
-}
-
-// Arroba física por praça
-function parseBoiByPlaza(text, plaza) {
-  const decoded = decodeEntities(text);
-
-  if (plaza === 'sao-paulo') {
-    const china = decoded.match(/São Paulo\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
-    const fisico = decoded.match(/SP Barretos\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
-
-    if (fisico) {
-      return {
-        region: 'SP Barretos',
-        value: brToNumber(fisico[1]),
-        term: brToNumber(fisico[2]),
-        note: 'Última cotação publicada do mercado físico em São Paulo',
-      };
-    }
-
-    if (china) {
-      return {
-        region: 'São Paulo',
-        value: brToNumber(china[1]),
-        term: brToNumber(china[2]),
-        note: 'Última cotação publicada para boi China a prazo em São Paulo',
-      };
-    }
-
-    return null;
-  }
-
-  const fisico = decoded.match(/GO Goiânia\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
-  const china = decoded.match(/Goiás\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
-
-  if (fisico) {
-    return {
-      region: 'GO Goiânia',
-      value: brToNumber(fisico[1]),
-      term: brToNumber(fisico[2]),
-      note: 'Última cotação publicada do mercado físico em Goiás',
-    };
-  }
-
-  if (china) {
-    return {
-      region: 'Goiás',
-      value: brToNumber(china[1]),
-      term: brToNumber(china[2]),
-      note: 'Última cotação publicada para boi China a prazo em Goiás',
-    };
-  }
-
-  return null;
-}
-
-// Milho e soja por praça
-function parseGraosByPlaza(text, plaza) {
-  const decoded = decodeEntities(text);
-
-  if (plaza === 'sao-paulo') {
-    const milho = decoded.match(/SP\s+São Paulo\s+(\d{1,3},\d{2})/);
-    const soja = decoded.match(/SP\s+Santos\s+(\d{1,3},\d{2})/);
-
-    return {
-      milho: milho
-        ? {
-            value: brToNumber(milho[1]),
-            praca: 'São Paulo (SP)',
-            note: 'Última cotação publicada de milho para São Paulo',
-          }
-        : null,
-      soja: soja
-        ? {
-            value: brToNumber(soja[1]),
-            praca: 'Santos (SP)',
-            note: 'Última cotação publicada de soja para Santos (SP)',
-          }
-        : null,
-    };
-  }
-
-  const milho = decoded.match(/GO\s+Itumbiara\s+(\d{1,3},\d{2})/);
-  const soja = decoded.match(/GO\s+Mineiros\s+(\d{1,3},\d{2})\s+Rio Verde\s+(\d{1,3},\d{2})\s+Jata[ií]\s+(\d{1,3},\d{2})/);
-
-  return {
-    milho: milho
-      ? {
-          value: brToNumber(milho[1]),
-          praca: 'Itumbiara (GO)',
-          note: 'Última cotação publicada de milho disponível em Goiás',
-        }
-      : null,
-    soja: soja
-      ? {
-          value: brToNumber(soja[3]),
-          praca: 'Jataí (GO)',
-          note: 'Última cotação publicada de soja para Jataí (GO)',
-        }
-      : null,
-  };
-}
-
-// Mercado futuro
-function parseFuturo(text) {
-  const decoded = decodeEntities(text);
-
-  const match = decoded.match(
-    /(Mar\/\d{2}|Abr\/\d{2}|Mai\/\d{2}|Jun\/\d{2}|Jul\/\d{2}|Ago\/\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d+)\s+(-?\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/
-  );
-
-  if (!match) return null;
-
-  return {
-    contract: match[1],
-    prevAdjust: brToNumber(match[2]),
-    adjust: brToNumber(match[3]),
-    openInterest: Number(match[4]),
-    changePercent: brToNumber(match[5]),
-    usd: brToNumber(match[6]),
-    projection: brToNumber(match[7]),
-    note: 'Último ajuste publicado do mercado futuro do boi gordo',
-  };
-}
-
-function buildPayload(plaza, boi, futuro, graos, noticias, updatedAt) {
-  return {
-    updatedAt,
-    status: 'Atualizado',
-    location: plaza === 'sao-paulo' ? 'São Paulo' : 'Goiás',
-    arroba: boi
-      ? {
-          value: moneyArroba(boi.value),
-          term: moneyArroba(boi.term),
-          source: 'Scot Consultoria',
-          region: boi.region,
-          note: boi.note,
-        }
-      : null,
-    futuro: futuro
-      ? {
-          contract: futuro.contract,
-          value: moneyArroba(futuro.adjust),
-          change: percentText(futuro.changePercent),
-          projection: moneyArroba(futuro.projection),
-          source: 'Scot Consultoria / B3',
-          note: futuro.note,
-        }
-      : null,
-    graos: {
-      milho: graos.milho ? moneySaca(graos.milho.value) : null,
-      milhoPraca: graos.milho?.praca || null,
-      milhoNote: graos.milho?.note || '',
-      soja: graos.soja ? moneySaca(graos.soja.value) : null,
-      sojaPraca: graos.soja?.praca || null,
-      sojaNote: graos.soja?.note || '',
-      source: 'Scot Consultoria / AgRural',
-    },
-    noticias,
-    sources: [
-      { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
-      { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
-      { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
-      { name: 'Google News', url: 'https://news.google.com/' },
-    ],
-    warning: '',
-  };
-}
-
 export default async (request) => {
   try {
     const url = new URL(request.url);
     const plaza = url.searchParams.get('plaza') === 'sao-paulo' ? 'sao-paulo' : 'goias';
 
-    const [boiHtml, graosHtml, futuroHtml, newsXml] = await Promise.all([
+    const [boi, graos, futuro, news] = await Promise.all([
       fetchText(URL_BOI),
       fetchText(URL_GRAOS),
       fetchText(URL_FUTURO),
       fetchText(URL_NEWS),
     ]);
 
-    const updatedAt = parsePublishedAt(boiHtml);
-    const boi = parseBoiByPlaza(boiHtml, plaza);
-    const graos = parseGraosByPlaza(graosHtml, plaza);
-    const futuro = parseFuturo(futuroHtml);
-    const noticias = extractNewsItems(newsXml, 6);
-
-    return json(buildPayload(plaza, boi, futuro, graos, noticias, updatedAt));
-  } catch (error) {
-    return json(
-      {
-        updatedAt: new Date().toLocaleString('pt-BR'),
-        status: 'Contingência',
-        location: 'Goiás',
-        warning: 'Não foi possível buscar as cotações no momento.',
-        debug: error instanceof Error ? error.message : 'Erro desconhecido',
-        arroba: null,
-        futuro: null,
-        graos: {
-          milho: null,
-          milhoPraca: null,
-          milhoNote: '',
-          soja: null,
-          sojaPraca: null,
-          sojaNote: '',
-          source: 'Scot Consultoria / AgRural',
+    return json({
+      timestamp: new Date().toISOString(),
+      plaza,
+      sources: {
+        boi: {
+          ok: boi.ok,
+          status: boi.status,
+          url: boi.url,
+          headers: boi.headers,
+          preview: preview(boi.body),
+          lines: lines(boi.body),
+          hasGoias: /Goi[aá]s|GO Goi[aâ]nia|GO Reg\. Sul/i.test(decodeEntities(boi.body)),
+          hasSaoPaulo: /S[aã]o Paulo|SP Barretos|SP Ara[cç]atuba/i.test(decodeEntities(boi.body)),
+          hasBarretos: /Barretos/i.test(decodeEntities(boi.body)),
+          hasGoiania: /Goi[aâ]nia/i.test(decodeEntities(boi.body)),
+          hasChina: /Boi China/i.test(decodeEntities(boi.body)),
         },
-        noticias: [
-          {
-            title: 'Mercado pecuário em monitoramento',
-            link: 'https://news.google.com/',
-            source: 'Boi Agora',
-          },
-        ],
-        sources: [
-          { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
-          { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
-          { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
-        ],
+        graos: {
+          ok: graos.ok,
+          status: graos.status,
+          url: graos.url,
+          headers: graos.headers,
+          preview: preview(graos.body),
+          lines: lines(graos.body),
+          hasItumbiara: /Itumbiara/i.test(decodeEntities(graos.body)),
+          hasJatai: /Jata[ií]/i.test(decodeEntities(graos.body)),
+          hasMineiros: /Mineiros/i.test(decodeEntities(graos.body)),
+          hasRioVerde: /Rio Verde/i.test(decodeEntities(graos.body)),
+          hasSantos: /Santos/i.test(decodeEntities(graos.body)),
+          hasSaoPaulo: /S[aã]o Paulo/i.test(decodeEntities(graos.body)),
+          hasMilho: /MILHO/i.test(decodeEntities(graos.body)),
+          hasSoja: /SOJA/i.test(decodeEntities(graos.body)),
+        },
+        futuro: {
+          ok: futuro.ok,
+          status: futuro.status,
+          url: futuro.url,
+          headers: futuro.headers,
+          preview: preview(futuro.body),
+          lines: lines(futuro.body),
+          hasMar26: /Mar\/\d{2}/i.test(decodeEntities(futuro.body)),
+          hasAbr26: /Abr\/\d{2}/i.test(decodeEntities(futuro.body)),
+          hasMai26: /Mai\/\d{2}/i.test(decodeEntities(futuro.body)),
+          hasJun26: /Jun\/\d{2}/i.test(decodeEntities(futuro.body)),
+        },
+        noticias: {
+          ok: news.ok,
+          status: news.status,
+          url: news.url,
+          headers: news.headers,
+          items: extractNewsItems(news.body),
+        },
       },
-      200
-    );
+    });
+  } catch (error) {
+    return json({
+      timestamp: new Date().toISOString(),
+      error: error instanceof Error ? error.message : 'Erro desconhecido',
+    });
   }
 };
