@@ -14,8 +14,8 @@ function toWhatsappLink(message) {
 const FALLBACK = {
   updatedAt: new Date().toISOString(),
   status: 'Contingência',
-  location: 'Jataí (GO)',
-  warning: 'Não foi possível buscar as últimas cotações publicadas neste momento.',
+  location: 'Goiás',
+  warning: 'Não foi possível buscar as cotações no momento.',
   arroba: null,
   futuro: null,
   graos: {
@@ -32,7 +32,7 @@ const FALLBACK = {
 };
 
 function App() {
-  const [city, setCity] = useState('jatai');
+  const [plaza, setPlaza] = useState('goias');
   const [refreshTick, setRefreshTick] = useState(0);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(FALLBACK);
@@ -44,7 +44,7 @@ function App() {
       setLoading(true);
 
       try {
-        const response = await fetch(`/.netlify/functions/painel?city=${city}`, {
+        const response = await fetch(`/.netlify/functions/painel?plaza=${plaza}`, {
           headers: { Accept: 'application/json' },
         });
 
@@ -74,7 +74,7 @@ function App() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [city, refreshTick]);
+  }, [plaza, refreshTick]);
 
   const newsItems = useMemo(() => data.noticias || [], [data]);
 
@@ -88,7 +88,7 @@ function App() {
             <h1>Boi Agora</h1>
             <p>
               Últimas cotações publicadas dos principais indicadores do mercado pecuário e agrícola,
-              com leitura direta para arroba física, mercado futuro, milho, soja e notícias.
+              com foco em arroba, mercado futuro, milho, soja e notícias.
             </p>
           </div>
         </div>
@@ -96,11 +96,9 @@ function App() {
         <div className="hero__actions">
           <label className="field">
             <span>Praça monitorada</span>
-            <select value={city} onChange={(e) => setCity(e.target.value)}>
-              <option value="jatai">Jataí GO</option>
-              <option value="mineiros">Mineiros GO</option>
-              <option value="formosa">Formosa GO</option>
-              <option value="uberlandia">Uberlândia MG</option>
+            <select value={plaza} onChange={(e) => setPlaza(e.target.value)}>
+              <option value="goias">Goiás</option>
+              <option value="sao-paulo">São Paulo</option>
             </select>
           </label>
 
@@ -130,7 +128,7 @@ function App() {
         </div>
         <div>
           <strong>Praça monitorada</strong>
-          <span>{data.location || 'Jataí (GO)'}</span>
+          <span>{data.location || 'Goiás'}</span>
         </div>
       </section>
 
@@ -146,8 +144,8 @@ function App() {
 
         <article className="summary-card">
           <span className="summary-card__label">Mercado futuro do boi</span>
-          <strong>{data.futuro?.value || 'Em breve'}</strong>
-          <small>{data.futuro?.contract || 'Integração em andamento'}</small>
+          <strong>{data.futuro?.value || '—'}</strong>
+          <small>{data.futuro?.contract || 'Sem contrato disponível'}</small>
           <small>Fonte: {data.futuro?.source || '—'}</small>
         </article>
 
@@ -171,7 +169,7 @@ function App() {
           <div className="panel__header">
             <div>
               <h2>Painel de cotações</h2>
-              <p>Últimos valores publicados dos indicadores consultados.</p>
+              <p>Últimos valores publicados das fontes consultadas.</p>
             </div>
           </div>
 
@@ -185,13 +183,9 @@ function App() {
 
             <div className="quote-box">
               <span>Mercado futuro do boi</span>
-              <strong>{data.futuro?.value || 'Em breve'}</strong>
-              <small>
-                {data.futuro?.contract
-                  ? `${data.futuro.contract} • ${data.futuro.change}`
-                  : 'Integração em andamento'}
-              </small>
-              <p>{data.futuro?.note || 'Bloco em preparação para próxima atualização.'}</p>
+              <strong>{data.futuro?.value || '—'}</strong>
+              <small>{data.futuro?.contract ? `${data.futuro.contract} • ${data.futuro.change}` : ''}</small>
+              <p>{data.futuro?.note || ''}</p>
             </div>
 
             <div className="quote-box">
@@ -240,7 +234,7 @@ function App() {
             ))}
           </div>
         </div>
-        <p>As praças exibidas usam a última cotação publicada disponível na fonte consultada.</p>
+        <p>As cotações exibem a última publicação disponível das fontes consultadas para Goiás e São Paulo.</p>
       </footer>
     </div>
   );
