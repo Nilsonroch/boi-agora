@@ -5,7 +5,7 @@ const URL_NEWS =
   'https://news.google.com/rss/search?q=pecu%C3%A1ria+de+corte+OR+boi+gordo+OR+mercado+do+boi+OR+milho+OR+soja+Brasil&hl=pt-BR&gl=BR&ceid=BR:pt-419';
 
 function json(data, status = 200) {
-  return new Response(JSON.stringify(data, null, 2), {
+  return new Response(JSON.stringify(data), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
@@ -37,6 +37,15 @@ function decodeEntities(text = '') {
     .replace(/&uuml;/gi, 'ü');
 }
 
+function normalizeText(text = '') {
+  return decodeEntities(text)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function stripHtml(text = '') {
   return decodeEntities(
     text
@@ -45,6 +54,30 @@ function stripHtml(text = '') {
       .replace(/\s+/g, ' ')
       .trim()
   );
+}
+
+function brToNumber(value) {
+  if (!value) return null;
+  const n = Number(String(value).replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+function moneyArroba(value) {
+  if (value == null) return null;
+  return `R$ ${Number(value).toFixed(2).replace('.', ',')}/@`;
+}
+
+function moneySaca(value) {
+  if (value == null) return null;
+  return `R$ ${Number(value).toFixed(2).replace('.', ',')}/sc`;
+}
+
+function percentText(value) {
+  if (value == null) return '';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  const signal = n > 0 ? '+' : '';
+  return `${signal}${n.toFixed(2).replace('.', ',')}%`;
 }
 
 async function fetchText(url) {
@@ -62,114 +95,5 @@ async function fetchText(url) {
 
   const body = await response.text();
 
-  return {
-    ok: response.ok,
-    status: response.status,
-    url,
-    body,
-    headers: {
-      contentType: response.headers.get('content-type'),
-      cacheControl: response.headers.get('cache-control'),
-      server: response.headers.get('server'),
-    },
-  };
-}
-
-function preview(text = '', size = 4000) {
-  return decodeEntities(text).slice(0, size);
-}
-
-function lines(text = '', count = 80) {
-  return decodeEntities(text)
-    .replace(/<\/(tr|p|div|li|h1|h2|h3|h4|br|table|thead|tbody|td|th|section|article)>/gi, '\n')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]*>/g, ' ')
-    .split('\n')
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .slice(0, count);
-}
-
-function extractNewsItems(xml, maxItems = 6) {
-  const items = [];
-  const blocks = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/g)];
-
-  for (const block of blocks.slice(0, maxItems)) {
-    const raw = block[1] || '';
-    const title = stripHtml((raw.match(/<title>([\s\S]*?)<\/title>/i) || [])[1] || '');
-    const link = stripHtml((raw.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || '');
-    const source = stripHtml((raw.match(/<source[^>]*>([\s\S]*?)<\/source>/i) || [])[1] || '') || 'Google News';
-
-    if (title && link) {
-      items.push({ title, link, source });
-    }
-  }
-
-  return items;
-}
-
-export default async () => {
-  try {
-    const [boi, graos, futuro, news] = await Promise.all([
-      fetchText(URL_BOI),
-      fetchText(URL_GRAOS),
-      fetchText(URL_FUTURO),
-      fetchText(URL_NEWS),
-    ]);
-
-    return json({
-      timestamp: new Date().toISOString(),
-      sources: {
-        boi: {
-          ok: boi.ok,
-          status: boi.status,
-          url: boi.url,
-          headers: boi.headers,
-          preview: preview(boi.body),
-          lines: lines(boi.body),
-          hasGoias: /Goi[aá]s/i.test(decodeEntities(boi.body)),
-          hasSaoPaulo: /S[aã]o Paulo/i.test(decodeEntities(boi.body)),
-          hasBarretos: /Barretos/i.test(decodeEntities(boi.body)),
-          hasGoiiania: /Goi[aâ]nia/i.test(decodeEntities(boi.body)),
-        },
-        graos: {
-          ok: graos.ok,
-          status: graos.status,
-          url: graos.url,
-          headers: graos.headers,
-          preview: preview(graos.body),
-          lines: lines(graos.body),
-          hasItumbiara: /Itumbiara/i.test(decodeEntities(graos.body)),
-          hasJatai: /Jata[ií]/i.test(decodeEntities(graos.body)),
-          hasMineiros: /Mineiros/i.test(decodeEntities(graos.body)),
-          hasSantos: /Santos/i.test(decodeEntities(graos.body)),
-          hasSaoPaulo: /S[aã]o Paulo/i.test(decodeEntities(graos.body)),
-        },
-        futuro: {
-          ok: futuro.ok,
-          status: futuro.status,
-          url: futuro.url,
-          headers: futuro.headers,
-          preview: preview(futuro.body),
-          lines: lines(futuro.body),
-          hasMar26: /Mar\/\d{2}/i.test(decodeEntities(futuro.body)),
-          hasAbr26: /Abr\/\d{2}/i.test(decodeEntities(futuro.body)),
-          hasMai26: /Mai\/\d{2}/i.test(decodeEntities(futuro.body)),
-        },
-        noticias: {
-          ok: news.ok,
-          status: news.status,
-          url: news.url,
-          headers: news.headers,
-          items: extractNewsItems(news.body),
-        },
-      },
-    });
-  } catch (error) {
-    return json({
-      timestamp: new Date().toISOString(),
-      error: error instanceof Error ? error.message : 'Erro desconhecido',
-    });
-  }
-};
+  if (!response.ok) {
+    throw new Error
