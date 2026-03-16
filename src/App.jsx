@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 
-function parseISODate(dateString) {
-  if (!dateString) return 'Agora';
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) return dateString;
+function parseDateLabel(value) {
+  if (!value) return 'Agora';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString('pt-BR');
 }
 
@@ -11,41 +11,36 @@ function toWhatsappLink(message) {
   return `https://wa.me/5562998575050?text=${encodeURIComponent(message)}`;
 }
 
-const MOCK_DATA = {
+const FALLBACK = {
   updatedAt: new Date().toISOString(),
+  status: 'Contingência',
   location: 'Jataí (GO)',
-  sources: [
-    { name: 'Google News', url: 'https://news.google.com/' },
-    { name: 'Canal Rural', url: 'https://www.canalrural.com.br/pecuaria/' },
-    { name: 'Globo Rural', url: 'https://globorural.globo.com/' },
-    { name: 'Compre Rural', url: 'https://www.comprerural.com/' },
-  ],
-  noticias: [
-    {
-      title: 'Mercado pecuário em monitoramento',
-      link: 'https://news.google.com/',
-      source: 'Boi Agora',
-    },
-    {
-      title: 'Painel aguardando integração com fontes físicas confiáveis',
-      link: 'https://news.google.com/',
-      source: 'Boi Agora',
-    },
-  ],
-  warning:
-    'As cotações físicas de arroba, milho e soja estão temporariamente ocultas até a integração com fontes adequadas por praça.',
+  warning: 'Não foi possível buscar as últimas cotações publicadas neste momento.',
+  arroba: null,
+  futuro: null,
+  graos: {
+    milho: null,
+    milhoPraca: null,
+    milhoNote: '',
+    soja: null,
+    sojaPraca: null,
+    sojaNote: '',
+    source: 'Scot Consultoria / AgRural',
+  },
+  noticias: [],
+  sources: [],
 };
 
 function App() {
-  const [data, setData] = useState(MOCK_DATA);
-  const [loading, setLoading] = useState(true);
   const [city, setCity] = useState('jatai');
   const [refreshTick, setRefreshTick] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(FALLBACK);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadDashboard() {
+    async function load() {
       setLoading(true);
 
       try {
@@ -54,18 +49,16 @@ function App() {
         });
 
         if (!response.ok) {
-          throw new Error('Não foi possível atualizar o painel agora.');
+          throw new Error('Falha ao atualizar.');
         }
 
         const payload = await response.json();
-
         if (!cancelled) {
-          const merged = { ...MOCK_DATA, ...payload };
-          setData(merged);
+          setData({ ...FALLBACK, ...payload });
         }
       } catch {
         if (!cancelled) {
-          setData(MOCK_DATA);
+          setData(FALLBACK);
         }
       } finally {
         if (!cancelled) {
@@ -74,8 +67,8 @@ function App() {
       }
     }
 
-    loadDashboard();
-    const timer = window.setInterval(loadDashboard, 5 * 60 * 1000);
+    load();
+    const timer = window.setInterval(load, 5 * 60 * 1000);
 
     return () => {
       cancelled = true;
@@ -83,7 +76,7 @@ function App() {
     };
   }, [city, refreshTick]);
 
-  const newsItems = useMemo(() => data.noticias || data.news || [], [data]);
+  const newsItems = useMemo(() => data.noticias || [], [data]);
 
   return (
     <div className="app-shell">
@@ -94,8 +87,8 @@ function App() {
             <span className="badge">Aplicativo de inteligência de mercado</span>
             <h1>Boi Agora</h1>
             <p>
-              Painel de acompanhamento da pecuária com radar de notícias e estrutura pronta para receber
-              cotações físicas confiáveis por praça.
+              Últimas cotações publicadas dos principais indicadores do mercado pecuário e agrícola,
+              com leitura direta para arroba física, mercado futuro, milho, soja e notícias.
             </p>
           </div>
         </div>
@@ -128,12 +121,12 @@ function App() {
 
       <section className="status-bar">
         <div>
-          <strong>Última atualização</strong>
-          <span>{parseISODate(data.updatedAt)}</span>
+          <strong>Última atualização publicada</strong>
+          <span>{parseDateLabel(data.updatedAt)}</span>
         </div>
         <div>
           <strong>Status</strong>
-          <span>{loading ? 'Atualizando dados...' : 'Online'}</span>
+          <span>{loading ? 'Atualizando dados...' : data.status || 'Online'}</span>
         </div>
         <div>
           <strong>Praça monitorada</strong>
@@ -141,86 +134,83 @@ function App() {
         </div>
       </section>
 
-      <section className="commercial-grid">
-        <article className="commercial-card">
-          <span className="trend-pill trend-pill--stable">Radar de mercado</span>
-          <strong>Informação confiável acima de tudo</strong>
-          <p>
-            O painel prioriza exibir apenas o que estiver tecnicamente coerente. As cotações físicas serão
-            mostradas quando estiverem ligadas a fontes corretas por praça.
-          </p>
-        </article>
-
-        <article className="commercial-card">
-          <span className="trend-pill trend-pill--stable">Atualização contínua</span>
-          <strong>Notícias da pecuária em tempo real</strong>
-          <p>
-            O app já atualiza automaticamente o radar de notícias para manter você informado sobre mercado,
-            arroba, exportação, grãos e cenário pecuário.
-          </p>
-        </article>
-
-        <article className="commercial-card commercial-card--strong">
-          <span className="trend-pill trend-pill--stable">Ação comercial</span>
-          <strong>Leitura rápida para decisão de compra e venda</strong>
-          <p>
-            Use o app como central de acompanhamento e acione seu atendimento técnico comercial com um toque.
-          </p>
-        </article>
-      </section>
+      {data.warning ? <div className="alert">{data.warning}</div> : null}
 
       <section className="summary-grid">
         <article className="summary-card">
           <span className="summary-card__label">Arroba física</span>
-          <strong>Em integração</strong>
-          <small>Aguardando fonte por praça</small>
+          <strong>{data.arroba?.value || '—'}</strong>
+          <small>{data.arroba?.region || 'Sem praça disponível'}</small>
+          <small>Fonte: {data.arroba?.source || '—'}</small>
         </article>
 
         <article className="summary-card">
           <span className="summary-card__label">Mercado futuro do boi</span>
-          <strong>Em integração</strong>
-          <small>Aguardando fonte validada</small>
+          <strong>{data.futuro?.value || '—'}</strong>
+          <small>{data.futuro?.contract || 'Sem contrato disponível'}</small>
+          <small>Fonte: {data.futuro?.source || '—'}</small>
         </article>
 
         <article className="summary-card">
           <span className="summary-card__label">Milho</span>
-          <strong>Em integração</strong>
-          <small>Aguardando cotação física</small>
+          <strong>{data.graos?.milho || '—'}</strong>
+          <small>{data.graos?.milhoPraca || 'Sem praça disponível'}</small>
+          <small>Fonte: {data.graos?.source || '—'}</small>
         </article>
 
         <article className="summary-card">
           <span className="summary-card__label">Soja</span>
-          <strong>Em integração</strong>
-          <small>Aguardando cotação física</small>
+          <strong>{data.graos?.soja || '—'}</strong>
+          <small>{data.graos?.sojaPraca || 'Sem praça disponível'}</small>
+          <small>Fonte: {data.graos?.source || '—'}</small>
         </article>
       </section>
 
-      <div className="market-note">
-        Em breve este painel exibirá cotações físicas validadas por praça.
-      </div>
-
-      <main className="content-grid">
-        <section className="panel panel--full">
+      <section className="content-grid">
+        <section className="panel">
           <div className="panel__header">
             <div>
               <h2>Painel de cotações</h2>
-              <p>Bloco reservado para arroba física, mercado futuro validado, milho e soja por praça.</p>
+              <p>Últimos valores publicados dos indicadores consultados.</p>
             </div>
           </div>
 
-          <div className="empty-state">
-            <strong>Cotações em preparação</strong>
-            <p>
-              Este bloco será ativado assim que as fontes corretas de cotação física estiverem conectadas ao app.
-            </p>
+          <div className="quote-stack">
+            <div className="quote-box">
+              <span>Arroba física</span>
+              <strong>{data.arroba?.value || '—'}</strong>
+              <small>{data.arroba?.region || ''}</small>
+              <p>{data.arroba?.note || ''}</p>
+            </div>
+
+            <div className="quote-box">
+              <span>Mercado futuro do boi</span>
+              <strong>{data.futuro?.value || '—'}</strong>
+              <small>{data.futuro?.contract ? `${data.futuro.contract} • ${data.futuro.change}` : ''}</small>
+              <p>{data.futuro?.note || ''}</p>
+            </div>
+
+            <div className="quote-box">
+              <span>Milho</span>
+              <strong>{data.graos?.milho || '—'}</strong>
+              <small>{data.graos?.milhoPraca || ''}</small>
+              <p>{data.graos?.milhoNote || ''}</p>
+            </div>
+
+            <div className="quote-box">
+              <span>Soja</span>
+              <strong>{data.graos?.soja || '—'}</strong>
+              <small>{data.graos?.sojaPraca || ''}</small>
+              <p>{data.graos?.sojaNote || ''}</p>
+            </div>
           </div>
         </section>
 
-        <section className="panel panel--full">
+        <section className="panel">
           <div className="panel__header">
             <div>
               <h2>Radar de notícias</h2>
-              <p>Últimos destaques da pecuária de corte.</p>
+              <p>Últimos destaques da pecuária e do mercado.</p>
             </div>
           </div>
 
@@ -233,7 +223,7 @@ function App() {
             ))}
           </div>
         </section>
-      </main>
+      </section>
 
       <footer className="footer">
         <div>
@@ -246,9 +236,7 @@ function App() {
             ))}
           </div>
         </div>
-        <p>
-          Instale o Boi Agora no celular pelo navegador usando a opção de adicionar à tela inicial.
-        </p>
+        <p>As praças exibidas usam a última cotação publicada disponível na fonte consultada.</p>
       </footer>
     </div>
   );
