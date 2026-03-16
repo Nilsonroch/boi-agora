@@ -39,7 +39,6 @@ const MOCK_DATA = {
 function App() {
   const [data, setData] = useState(MOCK_DATA);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [city, setCity] = useState('jatai');
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -48,7 +47,6 @@ function App() {
 
     async function loadDashboard() {
       setLoading(true);
-      setError('');
 
       try {
         const response = await fetch(`/.netlify/functions/painel?city=${city}`, {
@@ -64,14 +62,9 @@ function App() {
         if (!cancelled) {
           const merged = { ...MOCK_DATA, ...payload };
           setData(merged);
-
-          if (payload.warning) {
-            setError(payload.warning);
-          }
         }
-      } catch (err) {
+      } catch {
         if (!cancelled) {
-          setError(err.message || 'Falha ao atualizar os dados.');
           setData(MOCK_DATA);
         }
       } finally {
@@ -140,15 +133,13 @@ function App() {
         </div>
         <div>
           <strong>Status</strong>
-          <span>{loading ? 'Atualizando dados...' : error ? 'Online com observações' : 'Online'}</span>
+          <span>{loading ? 'Atualizando dados...' : 'Online'}</span>
         </div>
         <div>
           <strong>Praça monitorada</strong>
           <span>{data.location || 'Jataí (GO)'}</span>
         </div>
       </section>
-
-      {error ? <div className="alert">{error}</div> : null}
 
       <section className="commercial-grid">
         <article className="commercial-card">
@@ -205,8 +196,7 @@ function App() {
       </section>
 
       <div className="market-note">
-        As cotações físicas foram ocultadas temporariamente para evitar exibição de valores financeiros que não
-        representam a realidade da arroba, milho e soja por praça.
+        Em breve este painel exibirá cotações físicas validadas por praça.
       </div>
 
       <main className="content-grid">
@@ -219,9 +209,9 @@ function App() {
           </div>
 
           <div className="empty-state">
-            <strong>Cotações temporariamente ocultas</strong>
+            <strong>Cotações em preparação</strong>
             <p>
-              Este bloco será reativado assim que as fontes corretas de cotação física estiverem conectadas ao app.
+              Este bloco será ativado assim que as fontes corretas de cotação física estiverem conectadas ao app.
             </p>
           </div>
         </section>
