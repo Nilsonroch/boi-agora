@@ -1,5 +1,6 @@
 const URL_BOI = 'https://www.scotconsultoria.com.br/cotacoes/boi-gordo/?ref=foo';
 const URL_GRAOS = 'https://www.scotconsultoria.com.br/cotacoes/graos/?ref=foo';
+const URL_FUTURO = 'https://www.scotconsultoria.com.br/cotacoes/mercado-futuro/?ref=foo';
 const URL_NEWS =
   'https://news.google.com/rss/search?q=pecu%C3%A1ria+de+corte+OR+boi+gordo+OR+mercado+do+boi+OR+milho+OR+soja+Brasil&hl=pt-BR&gl=BR&ceid=BR:pt-419';
 
@@ -64,11 +65,20 @@ function brToNumber(value) {
 }
 
 function moneyArroba(value) {
+  if (value == null || Number.isNaN(Number(value))) return null;
   return `R$ ${Number(value).toFixed(2).replace('.', ',')}/@`;
 }
 
 function moneySaca(value) {
+  if (value == null || Number.isNaN(Number(value))) return null;
   return `R$ ${Number(value).toFixed(2).replace('.', ',')}/sc`;
+}
+
+function percentText(value) {
+  if (value == null || Number.isNaN(Number(value))) return '';
+  const num = Number(value);
+  const signal = num > 0 ? '+' : '';
+  return `${signal}${num.toFixed(2).replace('.', ',')}%`;
 }
 
 async function fetchText(url) {
@@ -104,7 +114,7 @@ function parseBoiRows(lines) {
 
   for (const line of lines) {
     const match = line.match(
-      /^(SP Barretos|SP Araçatuba|MG Triângulo|MG B\.Horizonte|MG Norte|MG Sul|GO Goiânia|GO Reg\. Sul|MS Dourados|MS C\. Grande|MT Cuiabá\*?|MT Sudeste|MT Sudoeste|MT Norte|BA Sul|BA Oeste|TO Sul)\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/i
+      /^(SP Barretos|SP Araçatuba|MG Triângulo|MG B\.Horizonte|MG Norte|MG Sul|GO Goiânia|GO Reg\. Sul|MS Dourados|MS C\. Grande|MS Três Lagoas|BA Sul|BA Oeste|MT Norte|MT Sudoeste|MT Cuiabá\*?|MT Sudeste|PR Noroeste|SC|MA Oeste|Alagoas|PA Marabá|PA Redenção|PA Paragominas|RO Sudeste|TO Sul|TO Norte|Acre|ES|RJ|Roraima)\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/i
     );
 
     if (!match) continue;
@@ -141,6 +151,7 @@ function parseGraos(lines) {
 
     if (!mode) continue;
     if (/^Preços médios|^UF Cidade Compra|^\*/i.test(line)) continue;
+    if (/^Acompanhe o mercado/i.test(line)) break;
 
     let match = line.match(/^([A-Z]{2})\s+(.+?)\s+(\d{1,3},\d{2})$/);
     if (match) {
@@ -168,6 +179,30 @@ function parseGraos(lines) {
   }
 
   return { milhoRows, sojaRows };
+}
+
+function parseFuturo(lines) {
+  const rows = [];
+
+  for (const line of lines) {
+    const match = line.match(
+      /^([A-Za-z]{3}\/\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d+)\s+(-?\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})$/
+    );
+
+    if (!match) continue;
+
+    rows.push({
+      contract: match[1],
+      prevAdjust: brToNumber(match[2]),
+      adjust: brToNumber(match[3]),
+      openInterest: Number(match[4]),
+      changePercent: brToNumber(match[5]),
+      usd: brToNumber(match[6]),
+      projection: brToNumber(match[7]),
+    });
+  }
+
+  return rows;
 }
 
 function stripHtml(text = '') {
@@ -204,24 +239,34 @@ function cityProfile(city) {
       label: 'Jataí (GO)',
       boiRegion: 'GO Reg. Sul',
       milho: [
-        { uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada mais próxima disponível em Goiás' },
+        { uf: 'GO', city: 'Rio Verde', note: 'Última referência publicada mais próxima disponível em Goiás' },
+        { uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada alternativa em Goiás' },
       ],
       soja: [
-        { uf: 'GO', city: 'Rio Verde', note: 'Última referência publicada mais próxima disponível em Goiás' },
         { uf: 'GO', city: 'Jataí', note: 'Cotação publicada para Jataí (GO)' },
+        { uf: 'GO', city: 'Rio Verde', note: 'Última referência publicada mais próxima disponível em Goiás' },
       ],
     },
     mineiros: {
       label: 'Mineiros (GO)',
       boiRegion: 'GO Reg. Sul',
-      milho: [{ uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada mais próxima disponível em Goiás' }],
+      milho: [
+        { uf: 'GO', city: 'Rio Verde', note: 'Última referência publicada mais próxima disponível em Goiás' },
+        { uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada alternativa em Goiás' },
+      ],
       soja: [{ uf: 'GO', city: 'Mineiros', note: 'Cotação publicada para Mineiros (GO)' }],
     },
     formosa: {
       label: 'Formosa (GO)',
       boiRegion: 'GO Goiânia',
-      milho: [{ uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada disponível em Goiás' }],
-      soja: [{ uf: 'DF', city: 'Brasília', note: 'Última referência publicada mais próxima disponível' }],
+      milho: [
+        { uf: 'MG', city: 'Unaí', note: 'Última referência publicada mais próxima disponível' },
+        { uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada alternativa em Goiás' },
+      ],
+      soja: [
+        { uf: 'DF', city: 'Brasília', note: 'Última referência publicada mais próxima disponível' },
+        { uf: 'GO', city: 'Rio Verde', note: 'Última referência publicada alternativa em Goiás' },
+      ],
     },
     uberlandia: {
       label: 'Uberlândia (MG)',
@@ -241,16 +286,18 @@ function pickRow(rows, preferences = []) {
     );
     if (found) return { ...found, note: pref.note || '' };
   }
+
   return rows[0] ? { ...rows[0], note: 'Última referência publicada disponível' } : null;
 }
 
-function buildPayload({ city, boiRows, milhoRows, sojaRows, news, publishedAt }) {
+function buildPayload({ city, boiRows, milhoRows, sojaRows, futuroRows, news, publishedAt }) {
   const profile = cityProfile(city);
 
   const boi =
     boiRows.find((row) => normalizeRegionName(row.region) === normalizeRegionName(profile.boiRegion)) || boiRows[0] || null;
   const milho = pickRow(milhoRows, profile.milho);
   const soja = pickRow(sojaRows, profile.soja);
+  const futuro = futuroRows[0] || null;
 
   return {
     updatedAt: publishedAt || new Date().toLocaleString('pt-BR'),
@@ -265,7 +312,16 @@ function buildPayload({ city, boiRows, milhoRows, sojaRows, news, publishedAt })
           note: `Última cotação publicada para ${boi.region}`,
         }
       : null,
-    futuro: null,
+    futuro: futuro
+      ? {
+          contract: futuro.contract,
+          value: moneyArroba(futuro.adjust),
+          change: percentText(futuro.changePercent),
+          projection: moneyArroba(futuro.projection),
+          source: 'Scot Consultoria / B3',
+          note: 'Último ajuste publicado do mercado futuro do boi gordo',
+        }
+      : null,
     graos: {
       milho: milho ? moneySaca(milho.price) : null,
       milhoPraca: milho ? `${milho.city} (${milho.uf})` : null,
@@ -279,10 +335,10 @@ function buildPayload({ city, boiRows, milhoRows, sojaRows, news, publishedAt })
     sources: [
       { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
       { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
+      { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
       { name: 'Google News', url: 'https://news.google.com/' },
     ],
-    warning:
-      'Arroba física, milho e soja exibem a última cotação publicada disponível. Mercado futuro será conectado em uma próxima atualização.',
+    warning: '',
   };
 }
 
@@ -291,19 +347,26 @@ export default async (request) => {
     const url = new URL(request.url);
     const city = url.searchParams.get('city') || 'jatai';
 
-    const [boiHtml, graosHtml, newsXml] = await Promise.all([
+    const [boiHtml, graosHtml, futuroHtml, newsXml] = await Promise.all([
       fetchText(URL_BOI),
       fetchText(URL_GRAOS),
+      fetchText(URL_FUTURO),
       fetchText(URL_NEWS),
     ]);
 
     const boiLines = toLines(stripHtmlWithLines(boiHtml));
     const graosLines = toLines(stripHtmlWithLines(graosHtml));
+    const futuroLines = toLines(stripHtmlWithLines(futuroHtml));
 
     const boiRows = parseBoiRows(boiLines);
     const { milhoRows, sojaRows } = parseGraos(graosLines);
+    const futuroRows = parseFuturo(futuroLines);
     const news = extractNewsItems(newsXml, 6);
-    const publishedAt = extractPublishedAt(boiLines) || extractPublishedAt(graosLines);
+
+    const publishedAt =
+      extractPublishedAt(boiLines) ||
+      extractPublishedAt(graosLines) ||
+      extractPublishedAt(futuroLines);
 
     return json(
       buildPayload({
@@ -311,6 +374,7 @@ export default async (request) => {
         boiRows,
         milhoRows,
         sojaRows,
+        futuroRows,
         news,
         publishedAt,
       })
@@ -344,6 +408,7 @@ export default async (request) => {
         sources: [
           { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
           { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
+          { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
         ],
       },
       200
