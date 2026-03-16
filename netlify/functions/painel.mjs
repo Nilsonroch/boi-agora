@@ -1,4 +1,4 @@
-const URL_BOI = 'https://www.scotconsultoria.com.br/cotacoes/boi-gordo/?ref=foo';
+const URL_INDICADORES = 'https://www.scotconsultoria.com.br/cotacoes/indicadores/?ref=foo';
 const URL_GRAOS = 'https://www.scotconsultoria.com.br/cotacoes/graos/?ref=foo';
 const URL_FUTURO = 'https://www.scotconsultoria.com.br/cotacoes/mercado-futuro/?ref=foo';
 const URL_NEWS =
@@ -60,23 +60,25 @@ function toLines(text = '') {
 }
 
 function brToNumber(value) {
-  if (!value) return 0;
-  return Number(String(value).replace(/\./g, '').replace(',', '.'));
+  if (!value) return null;
+  const num = Number(String(value).replace(/\./g, '').replace(',', '.'));
+  return Number.isFinite(num) ? num : null;
 }
 
 function moneyArroba(value) {
-  if (value == null || Number.isNaN(Number(value))) return null;
+  if (value == null) return null;
   return `R$ ${Number(value).toFixed(2).replace('.', ',')}/@`;
 }
 
 function moneySaca(value) {
-  if (value == null || Number.isNaN(Number(value))) return null;
+  if (value == null) return null;
   return `R$ ${Number(value).toFixed(2).replace('.', ',')}/sc`;
 }
 
 function percentText(value) {
-  if (value == null || Number.isNaN(Number(value))) return '';
+  if (value == null) return '';
   const num = Number(value);
+  if (!Number.isFinite(num)) return '';
   const signal = num > 0 ? '+' : '';
   return `${signal}${num.toFixed(2).replace('.', ',')}%`;
 }
@@ -102,28 +104,51 @@ function extractPublishedAt(lines) {
       item
     )
   );
-  return line || '';
+  return line || new Date().toLocaleString('pt-BR');
 }
 
-function normalizeRegionName(region = '') {
-  return region.replace(/\s+/g, ' ').trim();
+function normalize(text = '') {
+  return decodeEntities(text).replace(/\s+/g, ' ').trim();
 }
 
-function parseBoiRows(lines) {
+function parseIndicadores(lines) {
   const rows = [];
+  const allowed = [
+    'SP Barretos',
+    'SP Araçatuba',
+    'MG Triângulo',
+    'MG BH',
+    'MG B.Horizonte',
+    'MG Norte',
+    'MG Sul',
+    'GO Goiânia',
+    'GO Reg. Sul',
+    'MS Dourados',
+    'MS C. Grande',
+    'MT Cuiabá',
+    'MT Cuiabá*',
+    'MT Sudeste',
+    'MT Sudoeste',
+    'MT Norte',
+  ];
 
   for (const line of lines) {
-    const match = line.match(
-      /^(SP Barretos|SP Araçatuba|MG Triângulo|MG B\.Horizonte|MG Norte|MG Sul|GO Goiânia|GO Reg\. Sul|MS Dourados|MS C\. Grande|MS Três Lagoas|BA Sul|BA Oeste|MT Norte|MT Sudoeste|MT Cuiabá\*?|MT Sudeste|PR Noroeste|SC|MA Oeste|Alagoas|PA Marabá|PA Redenção|PA Paragominas|RO Sudeste|TO Sul|TO Norte|Acre|ES|RJ|Roraima)\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/i
-    );
+    for (const region of allowed) {
+      const escaped = region
+        .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\\ /g, '\\s+');
 
-    if (!match) continue;
-
-    rows.push({
-      region: normalizeRegionName(match[1]),
-      cash: brToNumber(match[2]),
-      term: brToNumber(match[3]),
-    });
+      const regex = new RegExp(`^${escaped}\\s+(\\d{1,3},\\d{2})\\s+(\\d{1,3},\\d{2})`);
+      const match = line.match(regex);
+      if (match) {
+        rows.push({
+          region: normalize(region.replace('MG BH', 'MG B.Horizonte')),
+          today: brToNumber(match[1]),
+          yesterday: brToNumber(match[2]),
+        });
+        break;
+      }
+    }
   }
 
   return rows;
@@ -132,11 +157,12 @@ function parseBoiRows(lines) {
 function parseGraos(lines) {
   const milhoRows = [];
   const sojaRows = [];
-
   let mode = '';
   let currentUf = '';
 
-  for (const line of lines) {
+  for (const rawLine of lines) {
+    const line = normalize(rawLine);
+
     if (/^MILHO\s*-/i.test(line)) {
       mode = 'milho';
       currentUf = '';
@@ -158,7 +184,7 @@ function parseGraos(lines) {
       currentUf = match[1];
       const row = {
         uf: currentUf,
-        city: decodeEntities(match[2]).trim(),
+        city: normalize(match[2]),
         price: brToNumber(match[3]),
       };
       if (mode === 'milho') milhoRows.push(row);
@@ -170,7 +196,7 @@ function parseGraos(lines) {
     if (match && currentUf) {
       const row = {
         uf: currentUf,
-        city: decodeEntities(match[1]).trim(),
+        city: normalize(match[1]),
         price: brToNumber(match[2]),
       };
       if (mode === 'milho') milhoRows.push(row);
@@ -260,8 +286,7 @@ function cityProfile(city) {
       label: 'Formosa (GO)',
       boiRegion: 'GO Goiânia',
       milho: [
-        { uf: 'MG', city: 'Unaí', note: 'Última referência publicada mais próxima disponível' },
-        { uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada alternativa em Goiás' },
+        { uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada disponível em Goiás' },
       ],
       soja: [
         { uf: 'DF', city: 'Brasília', note: 'Última referência publicada mais próxima disponível' },
@@ -282,34 +307,36 @@ function cityProfile(city) {
 function pickRow(rows, preferences = []) {
   for (const pref of preferences) {
     const found = rows.find(
-      (row) => row.uf.toUpperCase() === pref.uf.toUpperCase() && row.city.toLowerCase() === pref.city.toLowerCase()
+      (row) => row.uf.toUpperCase() === pref.uf.toUpperCase() && normalize(row.city).toLowerCase() === normalize(pref.city).toLowerCase()
     );
     if (found) return { ...found, note: pref.note || '' };
   }
-
   return rows[0] ? { ...rows[0], note: 'Última referência publicada disponível' } : null;
 }
 
-function buildPayload({ city, boiRows, milhoRows, sojaRows, futuroRows, news, publishedAt }) {
+function buildPayload({ city, indicadoresRows, milhoRows, sojaRows, futuroRows, news, publishedAt }) {
   const profile = cityProfile(city);
 
-  const boi =
-    boiRows.find((row) => normalizeRegionName(row.region) === normalizeRegionName(profile.boiRegion)) || boiRows[0] || null;
+  const arroba =
+    indicadoresRows.find((row) => normalize(row.region) === normalize(profile.boiRegion)) ||
+    indicadoresRows[0] ||
+    null;
+
   const milho = pickRow(milhoRows, profile.milho);
   const soja = pickRow(sojaRows, profile.soja);
   const futuro = futuroRows[0] || null;
 
   return {
-    updatedAt: publishedAt || new Date().toLocaleString('pt-BR'),
+    updatedAt: publishedAt,
     status: 'Atualizado',
     location: profile.label,
-    arroba: boi
+    arroba: arroba
       ? {
-          value: moneyArroba(boi.cash),
-          term: moneyArroba(boi.term),
+          value: moneyArroba(arroba.today),
+          yesterday: moneyArroba(arroba.yesterday),
           source: 'Scot Consultoria',
-          region: boi.region,
-          note: `Última cotação publicada para ${boi.region}`,
+          region: arroba.region,
+          note: `Última cotação publicada para ${arroba.region}`,
         }
       : null,
     futuro: futuro
@@ -333,12 +360,22 @@ function buildPayload({ city, boiRows, milhoRows, sojaRows, futuroRows, news, pu
     },
     noticias: news,
     sources: [
-      { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
+      { name: 'Scot Consultoria - Indicadores', url: URL_INDICADORES },
       { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
       { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
       { name: 'Google News', url: 'https://news.google.com/' },
     ],
     warning: '',
+    diagnostics: {
+      indicadoresRows: indicadoresRows.length,
+      milhoRows: milhoRows.length,
+      sojaRows: sojaRows.length,
+      futuroRows: futuroRows.length,
+      selectedArroba: arroba?.region || null,
+      selectedMilho: milho ? `${milho.city} (${milho.uf})` : null,
+      selectedSoja: soja ? `${soja.city} (${soja.uf})` : null,
+      selectedFuturo: futuro?.contract || null,
+    },
   };
 }
 
@@ -347,31 +384,32 @@ export default async (request) => {
     const url = new URL(request.url);
     const city = url.searchParams.get('city') || 'jatai';
 
-    const [boiHtml, graosHtml, futuroHtml, newsXml] = await Promise.all([
-      fetchText(URL_BOI),
+    const [indicadoresHtml, graosHtml, futuroHtml, newsXml] = await Promise.all([
+      fetchText(URL_INDICADORES),
       fetchText(URL_GRAOS),
       fetchText(URL_FUTURO),
       fetchText(URL_NEWS),
     ]);
 
-    const boiLines = toLines(stripHtmlWithLines(boiHtml));
+    const indicadoresLines = toLines(stripHtmlWithLines(indicadoresHtml));
     const graosLines = toLines(stripHtmlWithLines(graosHtml));
     const futuroLines = toLines(stripHtmlWithLines(futuroHtml));
 
-    const boiRows = parseBoiRows(boiLines);
+    const indicadoresRows = parseIndicadores(indicadoresLines);
     const { milhoRows, sojaRows } = parseGraos(graosLines);
     const futuroRows = parseFuturo(futuroLines);
     const news = extractNewsItems(newsXml, 6);
 
     const publishedAt =
-      extractPublishedAt(boiLines) ||
+      extractPublishedAt(indicadoresLines) ||
       extractPublishedAt(graosLines) ||
-      extractPublishedAt(futuroLines);
+      extractPublishedAt(futuroLines) ||
+      new Date().toLocaleString('pt-BR');
 
     return json(
       buildPayload({
         city,
-        boiRows,
+        indicadoresRows,
         milhoRows,
         sojaRows,
         futuroRows,
@@ -406,7 +444,7 @@ export default async (request) => {
           },
         ],
         sources: [
-          { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
+          { name: 'Scot Consultoria - Indicadores', url: URL_INDICADORES },
           { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
           { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
         ],
