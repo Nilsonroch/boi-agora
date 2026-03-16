@@ -53,6 +53,7 @@ function App() {
         }
 
         const payload = await response.json();
+
         if (!cancelled) {
           setData({ ...FALLBACK, ...payload });
         }
@@ -76,7 +77,13 @@ function App() {
     };
   }, [plaza, refreshTick]);
 
-  const newsItems = useMemo(() => data.noticias || [], [data]);
+  const newsItems = useMemo(() => {
+    return Array.isArray(data.noticias) ? data.noticias : [];
+  }, [data]);
+
+  const sourceList = useMemo(() => {
+    return Array.isArray(data.sources) ? data.sources : [];
+  }, [data]);
 
   return (
     <div className="app-shell">
@@ -227,7 +234,7 @@ function App() {
         <div>
           <strong>Fontes monitoradas</strong>
           <div className="source-list">
-            {(data.sources || []).map((source) => (
+            {sourceList.map((source) => (
               <a key={source.name} href={source.url} target="_blank" rel="noreferrer">
                 {source.name}
               </a>
