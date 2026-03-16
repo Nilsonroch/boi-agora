@@ -1,6 +1,5 @@
 const URL_BOI = 'https://www.scotconsultoria.com.br/cotacoes/boi-gordo/?ref=foo';
 const URL_GRAOS = 'https://www.scotconsultoria.com.br/cotacoes/graos/?ref=foo';
-const URL_FUTURO = 'https://www.scotconsultoria.com.br/cotacoes/mercado-futuro/?ref=foo';
 const URL_NEWS =
   'https://news.google.com/rss/search?q=pecu%C3%A1ria+de+corte+OR+boi+gordo+OR+mercado+do+boi+OR+milho+OR+soja+Brasil&hl=pt-BR&gl=BR&ceid=BR:pt-419';
 
@@ -15,23 +14,41 @@ function json(data, status = 200) {
   });
 }
 
+function decodeEntities(text = '') {
+  return text
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&ccedil;/gi, 'ç')
+    .replace(/&atilde;/gi, 'ã')
+    .replace(/&otilde;/gi, 'õ')
+    .replace(/&aacute;/gi, 'á')
+    .replace(/&eacute;/gi, 'é')
+    .replace(/&iacute;/gi, 'í')
+    .replace(/&oacute;/gi, 'ó')
+    .replace(/&uacute;/gi, 'ú')
+    .replace(/&agrave;/gi, 'à')
+    .replace(/&ecirc;/gi, 'ê')
+    .replace(/&ocirc;/gi, 'ô')
+    .replace(/&uuml;/gi, 'ü');
+}
+
 function stripHtmlWithLines(html = '') {
-  return html
-    .replace(/<\/(tr|p|div|li|h1|h2|h3|h4|br|table|thead|tbody|td|th|section|article)>/gi, '\n')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\r/g, '\n')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{2,}/g, '\n')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim();
+  return decodeEntities(
+    html
+      .replace(/<\/(tr|p|div|li|h1|h2|h3|h4|br|table|thead|tbody|td|th|section|article)>/gi, '\n')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\r/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{2,}/g, '\n')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim()
+  );
 }
 
 function toLines(text = '') {
@@ -54,12 +71,6 @@ function moneySaca(value) {
   return `R$ ${Number(value).toFixed(2).replace('.', ',')}/sc`;
 }
 
-function percentText(value) {
-  const num = brToNumber(value);
-  const signal = num > 0 ? '+' : '';
-  return `${signal}${num.toFixed(2).replace('.', ',')}%`;
-}
-
 async function fetchText(url) {
   const response = await fetch(url, {
     headers: {
@@ -76,35 +87,30 @@ async function fetchText(url) {
 }
 
 function extractPublishedAt(lines) {
-  const line = lines.find((item) => /\d{1,2} de .+ de \d{4}\s*-\s*\d{2}h\d{2}/i.test(item));
+  const line = lines.find((item) =>
+    /\d{1,2}\/\d{1,2}\/\d{4}|\d{1,2}\s+de\s+[a-zçãéôíóú]+\s+de\s+\d{4}|[A-Za-zçÇãõáéíóúâêô]+,\s*\d{1,2}\s+de/i.test(
+      item
+    )
+  );
   return line || '';
 }
 
+function normalizeRegionName(region = '') {
+  return region.replace(/\s+/g, ' ').trim();
+}
+
 function parseBoiRows(lines) {
-  const start = lines.findIndex((l) => l.includes('Mercado Físico -'));
-  const end = lines.findIndex((l, i) => i > start && l.includes('Fonte: Scot Consultoria'));
-
-  if (start === -1) return [];
-
   const rows = [];
-  const slice = lines.slice(start, end === -1 ? undefined : end);
 
-  for (const line of slice) {
-    const match = line.match(/^(.+?)\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+/);
+  for (const line of lines) {
+    const match = line.match(
+      /^(SP Barretos|SP Araçatuba|MG Triângulo|MG B\.Horizonte|MG Norte|MG Sul|GO Goiânia|GO Reg\. Sul|MS Dourados|MS C\. Grande|MT Cuiabá\*?|MT Sudeste|MT Sudoeste|MT Norte|BA Sul|BA Oeste|TO Sul)\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/i
+    );
+
     if (!match) continue;
 
-    const region = match[1].trim();
-
-    if (
-      /Mercado Físico|BOI GORDO|Preços Brutos|Funrural|Senar|à vista|base|Image|Estável|Subiu|Desceu|Fonte:/i.test(
-        region
-      )
-    ) {
-      continue;
-    }
-
     rows.push({
-      region,
+      region: normalizeRegionName(match[1]),
       cash: brToNumber(match[2]),
       term: brToNumber(match[3]),
     });
@@ -114,112 +120,64 @@ function parseBoiRows(lines) {
 }
 
 function parseGraos(lines) {
-  const milhoStart = lines.findIndex((l) => l.startsWith('MILHO -'));
-  const sojaStart = lines.findIndex((l) => l.startsWith('SOJA -'));
-
   const milhoRows = [];
   const sojaRows = [];
 
-  if (milhoStart !== -1) {
-    let currentUf = '';
-    for (const line of lines.slice(milhoStart + 1, sojaStart === -1 ? undefined : sojaStart)) {
-      if (/^Preços médios|^UF Cidade Compra|^\*/i.test(line)) continue;
-      if (!line || /^SOJA -/i.test(line)) break;
+  let mode = '';
+  let currentUf = '';
 
-      let match = line.match(/^([A-Z]{2})\s+(.+?)\s+(\d{1,3},\d{2})$/);
-      if (match) {
-        currentUf = match[1];
-        milhoRows.push({
-          uf: currentUf,
-          city: match[2].trim(),
-          price: brToNumber(match[3]),
-        });
-        continue;
-      }
-
-      match = line.match(/^(.+?)\s+(\d{1,3},\d{2})$/);
-      if (match && currentUf) {
-        milhoRows.push({
-          uf: currentUf,
-          city: match[1].trim(),
-          price: brToNumber(match[2]),
-        });
-      }
+  for (const line of lines) {
+    if (/^MILHO\s*-/i.test(line)) {
+      mode = 'milho';
+      currentUf = '';
+      continue;
     }
-  }
 
-  if (sojaStart !== -1) {
-    let currentUf = '';
-    for (const line of lines.slice(sojaStart + 1)) {
-      if (/^Preços médios|^UF Cidade Compra|^\*/i.test(line)) continue;
-      if (!line || /^Acompanhe o mercado/i.test(line)) break;
+    if (/^SOJA\s*-/i.test(line)) {
+      mode = 'soja';
+      currentUf = '';
+      continue;
+    }
 
-      let match = line.match(/^([A-Z]{2})\s+(.+?)\s+(\d{1,3},\d{2})$/);
-      if (match) {
-        currentUf = match[1];
-        sojaRows.push({
-          uf: currentUf,
-          city: match[2].trim(),
-          price: brToNumber(match[3]),
-        });
-        continue;
-      }
+    if (!mode) continue;
+    if (/^Preços médios|^UF Cidade Compra|^\*/i.test(line)) continue;
 
-      match = line.match(/^(.+?)\s+(\d{1,3},\d{2})$/);
-      if (match && currentUf) {
-        sojaRows.push({
-          uf: currentUf,
-          city: match[1].trim(),
-          price: brToNumber(match[2]),
-        });
-      }
+    let match = line.match(/^([A-Z]{2})\s+(.+?)\s+(\d{1,3},\d{2})$/);
+    if (match) {
+      currentUf = match[1];
+      const row = {
+        uf: currentUf,
+        city: decodeEntities(match[2]).trim(),
+        price: brToNumber(match[3]),
+      };
+      if (mode === 'milho') milhoRows.push(row);
+      if (mode === 'soja') sojaRows.push(row);
+      continue;
+    }
+
+    match = line.match(/^(.+?)\s+(\d{1,3},\d{2})$/);
+    if (match && currentUf) {
+      const row = {
+        uf: currentUf,
+        city: decodeEntities(match[1]).trim(),
+        price: brToNumber(match[2]),
+      };
+      if (mode === 'milho') milhoRows.push(row);
+      if (mode === 'soja') sojaRows.push(row);
     }
   }
 
   return { milhoRows, sojaRows };
 }
 
-function parseFuturo(lines) {
-  const start = lines.findIndex((l) => l.startsWith('MERCADO FUTURO DO BOI GORDO -'));
-  const end = lines.findIndex((l, i) => i > start && l.includes('Fonte: Scot Consultoria'));
-
-  if (start === -1) return [];
-
-  const rows = [];
-  const slice = lines.slice(start + 1, end === -1 ? undefined : end);
-
-  for (const line of slice) {
-    const match = line.match(
-      /^([A-Za-z]{3}\/\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d+)\s+(-?\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})$/
-    );
-
-    if (!match) continue;
-
-    rows.push({
-      contract: match[1],
-      prevAdjust: brToNumber(match[2]),
-      adjust: brToNumber(match[3]),
-      openInterest: Number(match[4]),
-      changePercent: brToNumber(match[5]),
-      usd: brToNumber(match[6]),
-      projection: brToNumber(match[7]),
-    });
-  }
-
-  return rows;
-}
-
 function stripHtml(text = '') {
-  return text
-    .replace(/<!\[CDATA\[(.*?)\]\]>/gs, '$1')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return decodeEntities(
+    text
+      .replace(/<!\[CDATA\[(.*?)\]\]>/gs, '$1')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 function extractNewsItems(xml, maxItems = 6) {
@@ -232,9 +190,7 @@ function extractNewsItems(xml, maxItems = 6) {
     const link = stripHtml((raw.match(/<link>([\s\S]*?)<\/link>/i) || [])[1] || '');
     const source = stripHtml((raw.match(/<source[^>]*>([\s\S]*?)<\/source>/i) || [])[1] || '') || 'Google News';
 
-    if (title && link) {
-      items.push({ title, link, source });
-    }
+    if (title && link) items.push({ title, link, source });
   }
 
   return items;
@@ -248,31 +204,24 @@ function cityProfile(city) {
       label: 'Jataí (GO)',
       boiRegion: 'GO Reg. Sul',
       milho: [
-        { uf: 'GO', city: 'Rio Verde', note: 'Referência regional do milho para o sudoeste de Goiás' },
-        { uf: 'GO', city: 'Itumbiara', note: 'Referência estadual alternativa do milho em Goiás' },
+        { uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada mais próxima disponível em Goiás' },
       ],
-      soja: [{ uf: 'GO', city: 'Jataí', note: 'Cotação publicada para Jataí (GO)' }],
+      soja: [
+        { uf: 'GO', city: 'Rio Verde', note: 'Última referência publicada mais próxima disponível em Goiás' },
+        { uf: 'GO', city: 'Jataí', note: 'Cotação publicada para Jataí (GO)' },
+      ],
     },
     mineiros: {
       label: 'Mineiros (GO)',
       boiRegion: 'GO Reg. Sul',
-      milho: [
-        { uf: 'GO', city: 'Rio Verde', note: 'Referência regional do milho para o sudoeste de Goiás' },
-        { uf: 'GO', city: 'Itumbiara', note: 'Referência estadual alternativa do milho em Goiás' },
-      ],
+      milho: [{ uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada mais próxima disponível em Goiás' }],
       soja: [{ uf: 'GO', city: 'Mineiros', note: 'Cotação publicada para Mineiros (GO)' }],
     },
     formosa: {
       label: 'Formosa (GO)',
       boiRegion: 'GO Goiânia',
-      milho: [
-        { uf: 'MG', city: 'Unaí', note: 'Referência regional mais próxima disponível para milho' },
-        { uf: 'GO', city: 'Itumbiara', note: 'Referência estadual alternativa em Goiás' },
-      ],
-      soja: [
-        { uf: 'DF', city: 'Brasília', note: 'Referência regional mais próxima disponível para soja' },
-        { uf: 'GO', city: 'Rio Verde', note: 'Referência estadual alternativa em Goiás' },
-      ],
+      milho: [{ uf: 'GO', city: 'Itumbiara', note: 'Última referência publicada disponível em Goiás' }],
+      soja: [{ uf: 'DF', city: 'Brasília', note: 'Última referência publicada mais próxima disponível' }],
     },
     uberlandia: {
       label: 'Uberlândia (MG)',
@@ -290,20 +239,18 @@ function pickRow(rows, preferences = []) {
     const found = rows.find(
       (row) => row.uf.toUpperCase() === pref.uf.toUpperCase() && row.city.toLowerCase() === pref.city.toLowerCase()
     );
-    if (found) {
-      return { ...found, note: pref.note || '' };
-    }
+    if (found) return { ...found, note: pref.note || '' };
   }
-  return null;
+  return rows[0] ? { ...rows[0], note: 'Última referência publicada disponível' } : null;
 }
 
-function buildPayload({ city, boiRows, milhoRows, sojaRows, futuroRows, news, publishedAt }) {
+function buildPayload({ city, boiRows, milhoRows, sojaRows, news, publishedAt }) {
   const profile = cityProfile(city);
 
-  const boi = boiRows.find((row) => row.region === profile.boiRegion) || boiRows[0] || null;
-  const milho = pickRow(milhoRows, profile.milho) || milhoRows[0] || null;
-  const soja = pickRow(sojaRows, profile.soja) || sojaRows[0] || null;
-  const futuro = futuroRows[0] || null;
+  const boi =
+    boiRows.find((row) => normalizeRegionName(row.region) === normalizeRegionName(profile.boiRegion)) || boiRows[0] || null;
+  const milho = pickRow(milhoRows, profile.milho);
+  const soja = pickRow(sojaRows, profile.soja);
 
   return {
     updatedAt: publishedAt || new Date().toLocaleString('pt-BR'),
@@ -315,22 +262,10 @@ function buildPayload({ city, boiRows, milhoRows, sojaRows, futuroRows, news, pu
           term: moneyArroba(boi.term),
           source: 'Scot Consultoria',
           region: boi.region,
-          note:
-            boi.region === profile.boiRegion
-              ? `Última cotação publicada para ${boi.region}`
-              : 'Última cotação publicada disponível',
+          note: `Última cotação publicada para ${boi.region}`,
         }
       : null,
-    futuro: futuro
-      ? {
-          contract: futuro.contract,
-          value: moneyArroba(futuro.adjust),
-          change: percentText(futuro.changePercent),
-          projection: moneyArroba(futuro.projection),
-          source: 'Scot Consultoria / B3',
-          note: 'Último ajuste publicado do mercado futuro do boi gordo',
-        }
-      : null,
+    futuro: null,
     graos: {
       milho: milho ? moneySaca(milho.price) : null,
       milhoPraca: milho ? `${milho.city} (${milho.uf})` : null,
@@ -343,11 +278,11 @@ function buildPayload({ city, boiRows, milhoRows, sojaRows, futuroRows, news, pu
     noticias: news,
     sources: [
       { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
-      { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
       { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
       { name: 'Google News', url: 'https://news.google.com/' },
     ],
-    warning: '',
+    warning:
+      'Arroba física, milho e soja exibem a última cotação publicada disponível. Mercado futuro será conectado em uma próxima atualização.',
   };
 }
 
@@ -356,24 +291,19 @@ export default async (request) => {
     const url = new URL(request.url);
     const city = url.searchParams.get('city') || 'jatai';
 
-    const [boiHtml, graosHtml, futuroHtml, newsXml] = await Promise.all([
+    const [boiHtml, graosHtml, newsXml] = await Promise.all([
       fetchText(URL_BOI),
       fetchText(URL_GRAOS),
-      fetchText(URL_FUTURO),
       fetchText(URL_NEWS),
     ]);
 
     const boiLines = toLines(stripHtmlWithLines(boiHtml));
     const graosLines = toLines(stripHtmlWithLines(graosHtml));
-    const futuroLines = toLines(stripHtmlWithLines(futuroHtml));
 
     const boiRows = parseBoiRows(boiLines);
     const { milhoRows, sojaRows } = parseGraos(graosLines);
-    const futuroRows = parseFuturo(futuroLines);
     const news = extractNewsItems(newsXml, 6);
-
-    const publishedAt =
-      extractPublishedAt(boiLines) || extractPublishedAt(graosLines) || extractPublishedAt(futuroLines);
+    const publishedAt = extractPublishedAt(boiLines) || extractPublishedAt(graosLines);
 
     return json(
       buildPayload({
@@ -381,7 +311,6 @@ export default async (request) => {
         boiRows,
         milhoRows,
         sojaRows,
-        futuroRows,
         news,
         publishedAt,
       })
@@ -394,6 +323,17 @@ export default async (request) => {
         location: 'Jataí (GO)',
         warning: 'Não foi possível buscar as últimas cotações publicadas neste momento.',
         debug: error instanceof Error ? error.message : 'Erro desconhecido',
+        arroba: null,
+        futuro: null,
+        graos: {
+          milho: null,
+          milhoPraca: null,
+          milhoNote: '',
+          soja: null,
+          sojaPraca: null,
+          sojaNote: '',
+          source: 'Scot Consultoria / AgRural',
+        },
         noticias: [
           {
             title: 'Mercado pecuário em monitoramento',
@@ -403,7 +343,6 @@ export default async (request) => {
         ],
         sources: [
           { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
-          { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
           { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
         ],
       },
