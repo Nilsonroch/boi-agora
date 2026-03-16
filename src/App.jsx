@@ -146,8 +146,8 @@ function App() {
 
         <article className="summary-card">
           <span className="summary-card__label">Mercado futuro do boi</span>
-          <strong>{data.futuro?.value || '—'}</strong>
-          <small>{data.futuro?.contract || 'Sem contrato disponível'}</small>
+          <strong>{data.futuro?.value || 'Em breve'}</strong>
+          <small>{data.futuro?.contract || 'Integração em andamento'}</small>
           <small>Fonte: {data.futuro?.source || '—'}</small>
         </article>
 
@@ -185,9 +185,13 @@ function App() {
 
             <div className="quote-box">
               <span>Mercado futuro do boi</span>
-              <strong>{data.futuro?.value || '—'}</strong>
-              <small>{data.futuro?.contract ? `${data.futuro.contract} • ${data.futuro.change}` : ''}</small>
-              <p>{data.futuro?.note || ''}</p>
+              <strong>{data.futuro?.value || 'Em breve'}</strong>
+              <small>
+                {data.futuro?.contract
+                  ? `${data.futuro.contract} • ${data.futuro.change}`
+                  : 'Integração em andamento'}
+              </small>
+              <p>{data.futuro?.note || 'Bloco em preparação para próxima atualização.'}</p>
             </div>
 
             <div className="quote-box">
