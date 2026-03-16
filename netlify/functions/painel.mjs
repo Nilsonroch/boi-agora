@@ -1,4 +1,4 @@
-const URL_INDICADORES = 'https://www.scotconsultoria.com.br/cotacoes/indicadores/?ref=foo';
+const URL_BOI = 'https://www.scotconsultoria.com.br/cotacoes/boi-gordo/?ref=foo';
 const URL_GRAOS = 'https://www.scotconsultoria.com.br/cotacoes/graos/?ref=foo';
 const URL_FUTURO = 'https://www.scotconsultoria.com.br/cotacoes/mercado-futuro/?ref=foo';
 const URL_NEWS =
@@ -74,8 +74,13 @@ function percentText(value) {
 async function fetchText(url) {
   const response = await fetch(url, {
     headers: {
-      'user-agent': 'BoiAgora/1.0',
+      'user-agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
       accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'accept-language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      referer: 'https://www.google.com/',
+      pragma: 'no-cache',
+      'cache-control': 'no-cache',
     },
   });
 
@@ -104,37 +109,43 @@ function extractNewsItems(xml, maxItems = 6) {
 
 function parsePublishedAt(text) {
   const decoded = decodeEntities(text);
-  const m =
+  const match =
+    decoded.match(/(\d{1,2}\/\d{1,2}\/\d{4}\s*-\s*\d{2}:\d{2}:\d{2})/) ||
     decoded.match(/([A-Za-zçÇãõáéíóúâêô-]+,\s*\d{1,2}\s+de\s+[A-Za-zçÇãõáéíóúâêô]+\s+de\s+\d{4}\s*-\s*\d{2}h\d{2})/i) ||
     decoded.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
-  return m ? m[1] : new Date().toLocaleString('pt-BR');
+
+  return match ? match[1] : new Date().toLocaleString('pt-BR');
 }
 
-function parseIndicadorBoi(text, plaza) {
+function parseBoiByPlaza(text, plaza) {
   const decoded = decodeEntities(text);
 
-  if (plaza === 'sao-paulo') {
-    const m = decoded.match(/SP Barretos\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
-    if (!m) return null;
+  // Boi China a prazo (R$/@)
+  const sp = decoded.match(/São Paulo\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
+  const go = decoded.match(/Goiás\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
+
+  if (plaza === 'sao-paulo' && sp) {
     return {
-      region: 'SP Barretos',
-      today: brToNumber(m[1]),
-      yesterday: brToNumber(m[2]),
-      note: 'Indicador Scot do boi gordo para São Paulo',
+      region: 'São Paulo',
+      today: brToNumber(sp[1]),
+      term: brToNumber(sp[2]),
+      note: 'Última cotação publicada para São Paulo',
     };
   }
 
-  const m = decoded.match(/GO Goiânia\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/);
-  if (!m) return null;
-  return {
-    region: 'GO Goiânia',
-    today: brToNumber(m[1]),
-    yesterday: brToNumber(m[2]),
-    note: 'Indicador Scot do boi gordo para Goiás',
-  };
+  if (plaza === 'goias' && go) {
+    return {
+      region: 'Goiás',
+      today: brToNumber(go[1]),
+      term: brToNumber(go[2]),
+      note: 'Última cotação publicada para Goiás',
+    };
+  }
+
+  return null;
 }
 
-function parseGraos(text, plaza) {
+function parseGraosByPlaza(text, plaza) {
   const decoded = decodeEntities(text);
 
   if (plaza === 'sao-paulo') {
@@ -160,8 +171,10 @@ function parseGraos(text, plaza) {
   }
 
   const milho = decoded.match(/GO\s+Itumbiara\s+(\d{1,3},\d{2})/);
-  const sojaTrio = decoded.match(/GO\s+Mineiros\s+(\d{1,3},\d{2})\s+Rio Verde\s+(\d{1,3},\d{2})\s+Jataí\s+(\d{1,3},\d{2})/);
-  const sojaSingle = decoded.match(/GO\s+Jataí\s+(\d{1,3},\d{2})/);
+
+  const sojaGo =
+    decoded.match(/GO\s+Mineiros\s+(\d{1,3},\d{2})\s+Rio Verde\s+(\d{1,3},\d{2})\s+Jataí\s+(\d{1,3},\d{2})/) ||
+    decoded.match(/GO\s+Jataí\s+(\d{1,3},\d{2})/);
 
   return {
     milho: milho
@@ -171,15 +184,9 @@ function parseGraos(text, plaza) {
           note: 'Última cotação publicada de milho disponível em Goiás',
         }
       : null,
-    soja: sojaTrio
+    soja: sojaGo
       ? {
-          value: brToNumber(sojaTrio[3]),
-          praca: 'Jataí (GO)',
-          note: 'Última cotação publicada de soja para Jataí (GO)',
-        }
-      : sojaSingle
-      ? {
-          value: brToNumber(sojaSingle[1]),
+          value: brToNumber(sojaGo[3] || sojaGo[1]),
           praca: 'Jataí (GO)',
           note: 'Última cotação publicada de soja para Jataí (GO)',
         }
@@ -189,35 +196,34 @@ function parseGraos(text, plaza) {
 
 function parseFuturo(text) {
   const decoded = decodeEntities(text);
-  const m = decoded.match(
+
+  const match = decoded.match(
     /(Mar\/\d{2}|Abr\/\d{2}|Mai\/\d{2}|Jun\/\d{2}|Jul\/\d{2}|Ago\/\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d+)\s+(-?\d{1,3},\d{2})\s+(\d{1,3},\d{2})\s+(\d{1,3},\d{2})/
   );
 
-  if (!m) return null;
+  if (!match) return null;
 
   return {
-    contract: m[1],
-    prevAdjust: brToNumber(m[2]),
-    adjust: brToNumber(m[3]),
-    openInterest: Number(m[4]),
-    changePercent: brToNumber(m[5]),
-    usd: brToNumber(m[6]),
-    projection: brToNumber(m[7]),
+    contract: match[1],
+    prevAdjust: brToNumber(match[2]),
+    adjust: brToNumber(match[3]),
+    openInterest: Number(match[4]),
+    changePercent: brToNumber(match[5]),
+    usd: brToNumber(match[6]),
+    projection: brToNumber(match[7]),
     note: 'Último ajuste publicado do mercado futuro do boi gordo',
   };
 }
 
 function buildPayload(plaza, boi, futuro, graos, noticias, updatedAt) {
-  const location = plaza === 'sao-paulo' ? 'São Paulo' : 'Goiás';
-
   return {
     updatedAt,
     status: 'Atualizado',
-    location,
+    location: plaza === 'sao-paulo' ? 'São Paulo' : 'Goiás',
     arroba: boi
       ? {
           value: moneyArroba(boi.today),
-          yesterday: moneyArroba(boi.yesterday),
+          term: moneyArroba(boi.term),
           source: 'Scot Consultoria',
           region: boi.region,
           note: boi.note,
@@ -244,7 +250,7 @@ function buildPayload(plaza, boi, futuro, graos, noticias, updatedAt) {
     },
     noticias,
     sources: [
-      { name: 'Scot Consultoria - Indicadores', url: URL_INDICADORES },
+      { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
       { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
       { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
       { name: 'Google News', url: 'https://news.google.com/' },
@@ -259,15 +265,15 @@ export default async (request) => {
     const plaza = url.searchParams.get('plaza') === 'sao-paulo' ? 'sao-paulo' : 'goias';
 
     const [boiHtml, graosHtml, futuroHtml, newsXml] = await Promise.all([
-      fetchText(URL_INDICADORES),
+      fetchText(URL_BOI),
       fetchText(URL_GRAOS),
       fetchText(URL_FUTURO),
       fetchText(URL_NEWS),
     ]);
 
     const updatedAt = parsePublishedAt(boiHtml);
-    const boi = parseIndicadorBoi(boiHtml, plaza);
-    const graos = parseGraos(graosHtml, plaza);
+    const boi = parseBoiByPlaza(boiHtml, plaza);
+    const graos = parseGraosByPlaza(graosHtml, plaza);
     const futuro = parseFuturo(futuroHtml);
     const noticias = extractNewsItems(newsXml, 6);
 
@@ -299,7 +305,7 @@ export default async (request) => {
           },
         ],
         sources: [
-          { name: 'Scot Consultoria - Indicadores', url: URL_INDICADORES },
+          { name: 'Scot Consultoria - Boi gordo', url: URL_BOI },
           { name: 'Scot Consultoria - Grãos', url: URL_GRAOS },
           { name: 'Scot Consultoria - Mercado futuro', url: URL_FUTURO },
         ],
